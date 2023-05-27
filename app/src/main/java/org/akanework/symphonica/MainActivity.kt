@@ -66,6 +66,7 @@ import org.akanework.symphonica.SymphonicaApplication.Companion.context
 import org.akanework.symphonica.logic.data.loadDataFromDisk
 import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.setPlaybackState
 import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.updateMetadata
+import org.akanework.symphonica.logic.util.TransitionMediaPlayer
 import org.akanework.symphonica.logic.util.broadcastMetaDataUpdate
 import org.akanework.symphonica.logic.util.broadcastSliderSeek
 import org.akanework.symphonica.logic.util.changePlayerStatus
@@ -192,7 +193,7 @@ class MainActivity : AppCompatActivity() {
         var isAkaneVisible: Boolean = false
 
         // This is the core of Symphonica, the music player.
-        var musicPlayer: MediaPlayer? = null
+        var musicPlayer: TransitionMediaPlayer? = null
 
         // This is the animator needed in companion functions.
         lateinit var animator: ObjectAnimator

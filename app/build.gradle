@@ -14,12 +14,11 @@ android {
 
     defaultConfig {
         applicationId "org.akanework.symphonica"
-        minSdk 33
+        minSdk 28
         targetSdk 33
         versionCode 1
         versionName "0.51b"
         buildConfigField("String", "GIT_HASH", "\"${gitCommitHash}\"")
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
