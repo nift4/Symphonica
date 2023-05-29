@@ -6,12 +6,13 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.MediaTimestamp
+import android.media.PlaybackParams
 import android.media.TimedMetaData
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.util.Log
-
+import java.lang.IllegalArgumentException
 
 class Timestamp(val systemAnchorTimeNano: Long, val mediaAnchorTimeMillis: Long,
                 val playbackSpeed: Float)
@@ -33,7 +34,8 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		// This media player was destroyed due to an fatal error.
 		fun onDestroySelf(mp: MediaPlayerState)
 		// Display error to user. Player will recycle or destroy itself as appropriate. "what" is one of
-		// MediaPlayer.MEDIA_ERROR_TIMED_OUT, MediaPlayer.MEDIA_ERROR_SERVER_DIED or MediaPlayer.MEDIA_ERROR_UNKNOWN
+		// MediaPlayer.MEDIA_ERROR_TIMED_OUT, MediaPlayer.MEDIA_ERROR_SERVER_DIED,
+		// MediaPlayer.MEDIA_ERROR_UNSUPPORTED (unsupported playback parameters) or MediaPlayer.MEDIA_ERROR_UNKNOWN
 		fun onInternalPlaybackError(mp: MediaPlayerState, what: Int)
 		// Display error to user. Player will recycle itself. "what" is one of MediaPlayer.MEDIA_ERROR_UNSUPPORTED,
 		// MediaPlayer.MEDIA_ERROR_NOT_VALID_FOR_PROGRESSIVE_PLAYBACK, MediaPlayer.MEDIA_ERROR_MALFORMED or
@@ -55,8 +57,6 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		fun onMetadataUpdate(mp: MediaPlayerState)
 		// Called when current track can not be seeked (e.g. live stream, web radio)
 		fun onUnseekablePlayback(mp: MediaPlayerState)
-		// Called if previously started seek operation succeeded
-		fun onSeekCompleted(mp: MediaPlayerState)
 		// Called if timestamp anchor changed (eg user seeked)
 		fun onNewTimestampAvailable(mp: MediaPlayerState, mts: Timestamp)
 		// Called when new livestream metadata became available.
@@ -71,8 +71,13 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	private var state = StateDiagram.IDLE
 	private var prepareListener: Runnable? = null
 	private val liveDataCallbacks: ArrayList<Runnable> = ArrayList()
-	val durationMillis: Int
-		get() = mediaPlayer.duration
+	val durationMillis: Long
+		get() = mediaPlayer.duration.toLong()
+	val currentPosition: Long
+		get() = mediaPlayer.currentPosition.toLong()
+	private var volume = 0f
+	private var pitch = 0f
+	private var speed = 0f
 
 	init {
 		mediaPlayer.setOnErrorListener(this)
@@ -83,7 +88,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		mediaPlayer.setOnSeekCompleteListener(this)
 		mediaPlayer.setOnCompletionListener(this)
 		mediaPlayer.setOnInfoListener(this)
-		mediaPlayer.setOnMediaTimeDiscontinuityListener(this)
+		mediaPlayer.setOnMediaTimeDiscontinuityListener(this, handler)
 		mediaPlayer.setOnPreparedListener(this)
 		mediaPlayer.setOnTimedMetaDataAvailableListener(this)
 	}
@@ -95,6 +100,8 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 			return true
 		}
 		state = StateDiagram.ERROR
+		// On Android versions older than P, we would send timestamp event here (and in other
+		// places), because OnMediaTimeDiscontinuityListener doesn't exist on these versions
 		if (what == MediaPlayer.MEDIA_ERROR_SERVER_DIED || extra == Int.MIN_VALUE /* MEDIA_ERROR_SYSTEM as per javadoc */) {
 			// Unrecoverable error.
 			onInternalPlaybackError(MediaPlayer.MEDIA_ERROR_SERVER_DIED)
@@ -134,7 +141,8 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	override fun onSeekComplete(mp: MediaPlayer) {
 		if (state != StateDiagram.BUSY) {
 			assertState(StateDiagram.STARTED)
-			onSeekCompleted()
+			// On Android versions older than P, we would send timestamp event here (and in other
+			// places), because OnMediaTimeDiscontinuityListener doesn't exist on these versions
 		}
 	}
 
@@ -150,6 +158,8 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 			)
 			state = StateDiagram.COMPLETED
 			recycleSelf() // includes onCompletedPlaying()
+			// On Android versions older than P, we would send timestamp event here (and in other
+			// places), because OnMediaTimeDiscontinuityListener doesn't exist on these versions
 		}
 	}
 
@@ -206,7 +216,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 				Log.i(TAG, "Dropping implementation-detail MEDIA_INFO_UNKNOWN $extra")
 			}
 			else -> {
-				Log.w(TAG, "Dropping info what=$what extra=$extra")
+				Log.w(TAG, "Dropping unknown info what=$what extra=$extra")
 			}
 		}
 		return true
@@ -292,7 +302,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	fun initialize(playable: Playable) {
 		assertState(StateDiagram.IDLE)
 		state = StateDiagram.BUSY
-		mediaPlayer.setDataSource(applicationContext, playable.toUri())
+		mediaPlayer.setDataSource(applicationContext, playable.uri)
 		state = StateDiagram.INITIALIZED
 	}
 
@@ -307,6 +317,38 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 			mediaPlayer.prepare()
 			state = StateDiagram.PREPARED
 		}
+	}
+
+	fun updatePlaybackSettings(volume: Float, speed: Float, pitch: Float) {
+		if ((state == StateDiagram.STARTED && speed > 0f)
+			|| (state == StateDiagram.PAUSED && speed == 0f)) {
+			// Avoid implicit start/pause
+			syncPlaybackSettings()
+		}
+		this.volume = volume
+		this.pitch = pitch
+		this.speed = speed
+	}
+
+	private fun syncPlaybackSettings() {
+		val playbackParams = PlaybackParams()
+		playbackParams.speed = speed
+		playbackParams.pitch = pitch
+		playbackParams.audioFallbackMode = PlaybackParams.AUDIO_FALLBACK_MODE_FAIL
+		try {
+			mediaPlayer.playbackParams = playbackParams
+			setVolume(volume)
+		} catch (ex: IllegalArgumentException) {
+			Log.e(TAG, Log.getStackTraceString(ex))
+			onInternalPlaybackError(MediaPlayer.MEDIA_ERROR_UNSUPPORTED)
+			recycleSelf()
+		}
+		// On Android versions older than P, we would send timestamp event here (and in other
+		// places), because OnMediaTimeDiscontinuityListener doesn't exist on these versions
+	}
+
+	private fun setVolume(volume: Float) {
+		mediaPlayer.setVolume(volume, volume)
 	}
 
 	fun start(async: Boolean) {
@@ -326,19 +368,27 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		}
 		assertState(StateDiagram.PREPARED, StateDiagram.PAUSED)
 		state = StateDiagram.STARTED
-		mediaPlayer.start()
+		syncPlaybackSettings() // includes mediaPlayer.start() in mediaPlayer.setPlaybackParams()
+	}
+
+	fun seek(newPosMillis: Long) {
+		mediaPlayer.seekTo(newPosMillis, MediaPlayer.SEEK_PREVIOUS_SYNC)
 	}
 
 	fun pause() {
 		assertState(StateDiagram.STARTED)
 		state = StateDiagram.PAUSED
 		mediaPlayer.pause()
+		// On Android versions older than P, we would send timestamp event here (and in other
+		// places), because OnMediaTimeDiscontinuityListener doesn't exist on these versions
 	}
 
 	fun stop() {
 		assertState(StateDiagram.STARTED, StateDiagram.PAUSED, StateDiagram.PREPARED)
 		state = StateDiagram.STOPPED
 		mediaPlayer.stop()
+		// On Android versions older than P, we would send timestamp event here (and in other
+		// places), because OnMediaTimeDiscontinuityListener doesn't exist on these versions
 	}
 
 	fun setNext(mp: MediaPlayerState?) {
@@ -416,6 +466,8 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 
 	private fun onMediaBuffering(buffering: Boolean) {
 		handler.post {
+			// On Android versions older than P, we would send timestamp event here (and in other
+			// places), because OnMediaTimeDiscontinuityListener doesn't exist on these versions
 			callback.onMediaBuffering(this, buffering)
 		}
 	}
@@ -435,12 +487,6 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	private fun onUnseekablePlayback() {
 		handler.post {
 			callback.onUnseekablePlayback(this)
-		}
-	}
-
-	private fun onSeekCompleted() {
-		handler.post {
-			callback.onSeekCompleted(this)
 		}
 	}
 
@@ -470,8 +516,8 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 }
 
 /** Opaque object that can be played by MediaPlayer. */
-class Playable(private val uri: Uri) {
-	fun toUri() = uri
+interface Playable {
+	val uri: Uri
 }
 
 abstract class NextTrackPredictor {
@@ -481,16 +527,17 @@ abstract class NextTrackPredictor {
 		onPredictionChangedListener?.onPredictionChanged(currentSongImpacted)
 	}
 
-	protected fun dispatchPlay() {
-		onPredictionChangedListener?.play()
+	protected fun dispatchPlayOrPause() {
+		onPredictionChangedListener?.playOrPause()
 	}
 
-	protected fun displayPause() {
-		onPredictionChangedListener?.pause()
+	protected fun dispatchSeek(newPosMillis: Long) {
+		onPredictionChangedListener?.seek(newPosMillis)
 	}
 
-	protected fun dispatchStop() {
-		onPredictionChangedListener?.stop()
+
+	protected fun dispatchPlaybackSettings(volume: Float, speed: Float, pitch: Float) {
+		onPredictionChangedListener?.updatePlaybackSettings(volume, speed, pitch)
 	}
 
 	/**
@@ -513,22 +560,24 @@ abstract class NextTrackPredictor {
 
 	interface OnPredictionChangedListener {
 		fun onPredictionChanged(currentSongImpacted: Boolean)
-		fun play()
-		fun pause()
-		fun stop()
+		fun playOrPause()
+		fun seek(newPosMillis: Long)
+		fun updatePlaybackSettings(volume: Float, speed: Float, pitch: Float)
 	}
 }
 
 interface MediaStateCallback {
 	fun onPlayingStatusChanged(playing: Boolean)
+	fun onUserPlayingStatusChanged(playing: Boolean)
 	fun onLiveInfoAvailable(text: String)
-	fun onTimestampInfoAvailable(timestamp: Timestamp)
+	fun onMediaTimestampChanged(timestampMillis: Long)
 	fun onSetSeekable(seekable: Boolean)
 	fun onMediaBufferSlowStatus(slowBuffer: Boolean)
-	fun onMediaBufferProgess(progress: Float)
+	fun onMediaBufferProgress(progress: Float)
 	fun onMediaHasDecreasedPerformance()
 	fun onPlaybackError(what: Int)
-	fun onDurationAvailable(durationMillis: Int)
+	fun onDurationAvailable(durationMillis: Long)
+	fun onPlaybackSettingsChanged(volume: Float, speed: Float, pitch: Float)
 
 	open class Dispatcher : MediaStateCallback {
 		private val callbacks: HashSet<MediaStateCallback> = HashSet()
@@ -545,12 +594,16 @@ interface MediaStateCallback {
 			callbacks.forEach { it.onPlayingStatusChanged(playing) }
 		}
 
+		override fun onUserPlayingStatusChanged(playing: Boolean) {
+			callbacks.forEach { it.onUserPlayingStatusChanged(playing) }
+		}
+
 		override fun onLiveInfoAvailable(text: String) {
 			callbacks.forEach { it.onLiveInfoAvailable(text) }
 		}
 
-		override fun onTimestampInfoAvailable(timestamp: Timestamp) {
-			callbacks.forEach { it.onTimestampInfoAvailable(timestamp) }
+		override fun onMediaTimestampChanged(timestampMillis: Long) {
+			callbacks.forEach { it.onMediaTimestampChanged(timestampMillis) }
 		}
 
 		override fun onSetSeekable(seekable: Boolean) {
@@ -561,8 +614,8 @@ interface MediaStateCallback {
 			callbacks.forEach { it.onMediaBufferSlowStatus(slowBuffer) }
 		}
 
-		override fun onMediaBufferProgess(progress: Float) {
-			callbacks.forEach { it.onMediaBufferProgess(progress) }
+		override fun onMediaBufferProgress(progress: Float) {
+			callbacks.forEach { it.onMediaBufferProgress(progress) }
 		}
 
 		override fun onMediaHasDecreasedPerformance() {
@@ -573,8 +626,12 @@ interface MediaStateCallback {
 			callbacks.forEach { it.onPlaybackError(what) }
 		}
 
-		override fun onDurationAvailable(durationMillis: Int) {
-			callbacks.forEach { it.onPlaybackError(durationMillis) }
+		override fun onDurationAvailable(durationMillis: Long) {
+			callbacks.forEach { it.onDurationAvailable(durationMillis) }
+		}
+
+		override fun onPlaybackSettingsChanged(volume: Float, speed: Float, pitch: Float) {
+			callbacks.forEach { it.onPlaybackSettingsChanged(volume, speed, pitch) }
 		}
 
 	}
@@ -598,6 +655,18 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 			return false
 		}
 	}
+	private val timestampUpdater: Runnable = object : Runnable {
+		override fun run() {
+			if (timestamp == null || !playing || mediaPlayer == null) {
+				return
+			}
+			val currentPosition: Long = mediaPlayer?.currentPosition ?: 0
+			handler.postDelayed(this, ((currentPosition % 1000) * (timestamp?.playbackSpeed ?: 1f)).toLong())
+			if (currentPosition >= 0) {
+				onMediaTimestampChanged(currentPosition)
+			}
+		}
+	}
 	private val playbackAttributes = AudioAttributes.Builder()
 		.setUsage(AudioAttributes.USAGE_MEDIA)
 		.setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -619,6 +688,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 				playing = false
 				ignoreAudioFocus = false
 			}
+			onUserPlayingStatusChanged(value)
 		}
 	private var ignoreAudioFocus = false
 		set(value) {
@@ -645,6 +715,26 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 				}
 			}
 		}
+	private var seekable = true
+		set(value) {
+			if (value != field) {
+				field = value
+				onSetSeekable(value)
+			}
+		}
+	private var volume = 0f
+	private var pitch = 0f
+	private var speed = 0f
+	private var timestamp: Timestamp? = null
+		set(value) {
+			if (value != field) {
+				field = value
+				handler.removeCallbacks(timestampUpdater)
+				if (value != null) {
+					handler.post(timestampUpdater)
+				}
+			}
+		}
 
 	companion object {
 		private const val TAG = "TransitionMediaPlayer"
@@ -665,33 +755,49 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 		onPredictionChanged(true)
 	}
 
-	override fun play() {
-		if (userPlaying) {
-			ignoreAudioFocus = true
-			return
-		}
-		userPlaying = true
-		if (playing) return // should never happen, but well
-		if (!ignoreAudioFocus) {
-			val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-				.setAudioAttributes(playbackAttributes)
-				.setAcceptsDelayedFocusGain(true)
-				.setWillPauseWhenDucked(false)
-				.setOnAudioFocusChangeListener(this, handler)
-				.build()
-			audioManager.requestAudioFocus(focusRequest)
+	override fun playOrPause() {
+		if (playing) {
+			userPlaying = false
+			realPause()
 		} else {
-			realPlay()
+			if (userPlaying) {
+				ignoreAudioFocus = true
+				return
+			}
+			userPlaying = true
+			if (playing) return // should never happen, but well
+			if (!ignoreAudioFocus) {
+				val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+					.setAudioAttributes(playbackAttributes)
+					.setAcceptsDelayedFocusGain(true)
+					.setWillPauseWhenDucked(false)
+					.setOnAudioFocusChangeListener(this, handler)
+					.build()
+				audioManager.requestAudioFocus(focusRequest)
+			} else {
+				realPlay()
+			}
 		}
 	}
 
-	override fun pause() {
-		userPlaying = false
-		realPause()
+	override fun seek(newPosMillis: Long) {
+		if (!seekable) {
+			throw IllegalArgumentException("tried to seek on unseekable MediaPlayer")
+		}
+		mediaPlayer?.seek(newPosMillis)
 	}
 
-	override fun stop() {
+	override fun updatePlaybackSettings(volume: Float, speed: Float, pitch: Float) {
+		mediaPlayer?.updatePlaybackSettings(volume, speed, pitch)
+		this.volume = volume
+		this.pitch = pitch
+		this.speed = speed
+		onPlaybackSettingsChanged(volume, speed, pitch)
+	}
+
+	private fun stop() {
 		userPlaying = false
+		timestamp = null
 		try {
 			mediaPlayer?.stop()
 		} catch (_: IllegalStateException) {}
@@ -721,8 +827,9 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 				hasAudioFocus = true
 			}
 			AudioManager.AUDIOFOCUS_LOSS -> {
-				pause()
+				userPlaying = false
 				hasAudioFocus = false
+				realPause()
 			}
 			AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
 				hasAudioFocus = false
@@ -738,6 +845,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 		if (mediaPlayer == null) {
 			skip()
 		} else {
+			mediaPlayer?.updatePlaybackSettings(volume, speed, pitch)
 			mediaPlayer?.start(true)
 		}
 	}
@@ -779,6 +887,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 	 * current song is no longer played (e.g. user is now playing another song).
 	 */
 	private fun skip() {
+		timestamp = null
 		if (nextMediaPlayer == null) {
 			val playable = trackPredictor.predictNextTrack(true)
 			if (playable != null) {
@@ -790,6 +899,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 		mediaPlayer = nextMediaPlayer
 		nextMediaPlayer = null
 		if (mediaPlayer != null) {
+			mediaPlayer?.updatePlaybackSettings(volume, speed, pitch)
 			if (playing) {
 				mediaPlayer?.start(true)
 			} else {
@@ -798,7 +908,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 		} else {
 			userPlaying = false
 		}
-		onSetSeekable(true)
+		seekable = true
 		maybeCleanupPool()
 	}
 
@@ -892,7 +1002,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player has buffer progress")
 		}
-		onMediaBufferProgess(progress)
+		onMediaBufferProgress(progress)
 	}
 
 	override fun onMediaBuffering(mp: MediaPlayerState, buffering: Boolean) {
@@ -906,7 +1016,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 		if (mediaPlayer != null) {
 			throw IllegalStateException()
 		}
-		onSetSeekable(true)
+		seekable = true
 		mediaPlayer = mp
 		// Consume track now that we started playing it.
 		trackPredictor.predictNextTrack(true)
@@ -919,18 +1029,14 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 	}
 
 	override fun onUnseekablePlayback(mp: MediaPlayerState) {
-		onSetSeekable(false)
-	}
-
-	override fun onSeekCompleted(mp: MediaPlayerState) {
-		// TODO
+		seekable = false
 	}
 
 	override fun onNewTimestampAvailable(mp: MediaPlayerState, mts: Timestamp) {
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player has new timestamps")
 		}
-		onTimestampInfoAvailable(mts)
+		timestamp = mts
 	}
 
 	override fun onLiveDataAvailable(mp: MediaPlayerState, text: String) {
