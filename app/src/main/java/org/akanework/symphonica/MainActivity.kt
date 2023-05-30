@@ -63,7 +63,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.akanework.symphonica.SymphonicaApplication.Companion.context
 import org.akanework.symphonica.logic.data.loadDataFromDisk
-import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.updateMetadata
 import org.akanework.symphonica.logic.util.broadcastMetaDataUpdate
 import org.akanework.symphonica.logic.util.broadcastSliderSeek
 import org.akanework.symphonica.logic.util.changePlayerStatus
@@ -698,7 +697,7 @@ class MainActivity : AppCompatActivity() {
         // Update the data if resumed.
         // They might be lost if don't do so.
         if (playlistViewModel.playList.size != 0) {
-            updateMetadata()
+            //updateMetadata()
             updateAlbumView(this.findViewById(R.id.global_bottom_sheet))
         }
 

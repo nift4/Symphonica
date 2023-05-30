@@ -61,6 +61,8 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		fun onNewTimestampAvailable(mp: MediaPlayerState, mts: Timestamp)
 		// Called when new livestream metadata became available.
 		fun onLiveDataAvailable(mp: MediaPlayerState, text: String)
+		// Called when duration became known
+		fun onDurationAvailable(mp: MediaPlayerState, durationMillis: Long)
 	}
 
 	companion object {
@@ -240,6 +242,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		if (state != StateDiagram.BUSY) {
 			assertState(StateDiagram.PREPARING)
 			state = StateDiagram.PREPARED
+			onDurationAvailable(durationMillis)
 			prepareListener?.run()
 		}
 	}
@@ -275,7 +278,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	}
 
 	private fun cleanup() {
-		for (i in 0..liveDataCallbacks.size) {
+		for (i in 1..liveDataCallbacks.size) {
 			handler.removeCallbacks(liveDataCallbacks.removeFirst())
 		}
 		prepareListener = null
@@ -499,6 +502,12 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	private fun onLiveDataAvailable(text: String) {
 		handler.post {
 			callback.onLiveDataAvailable(this, text)
+		}
+	}
+
+	private fun onDurationAvailable(durationMillis: Long) {
+		handler.post {
+			callback.onDurationAvailable(this, durationMillis)
 		}
 	}
 
@@ -800,7 +809,9 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 		timestamp = null
 		try {
 			mediaPlayer?.stop()
-		} catch (_: IllegalStateException) {}
+		} catch (ex: IllegalStateException) {
+			Log.w(TAG, Log.getStackTraceString(ex))
+		}
 		mediaPlayer?.let {
 			it.recycle()
 			mediaPlayerPool.add(it)
@@ -856,9 +867,6 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 	}
 
 	override fun onPredictionChanged(currentSongImpacted: Boolean) {
-		if (mediaPlayer == null) {
-			return
-		}
 		nextMediaPlayer?.let {
 			it.recycle()
 			mediaPlayerPool.add(it)
@@ -875,7 +883,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 				if (playable != null) {
 					nextMediaPlayer = getNextRecycledMediaPlayer()
 					nextMediaPlayer?.initialize(playable)
-					nextMediaPlayer?.durationMillis?.let { onDurationAvailable(it) }
+					nextMediaPlayer?.preload(true)
 					nextMediaPlayer
 				} else null
 			}
@@ -893,7 +901,6 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 			if (playable != null) {
 				nextMediaPlayer = getNextRecycledMediaPlayer()
 				nextMediaPlayer?.initialize(playable)
-				nextMediaPlayer?.durationMillis?.let { onDurationAvailable(it) }
 			}
 		}
 		mediaPlayer = nextMediaPlayer
@@ -1020,6 +1027,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 		mediaPlayer = mp
 		// Consume track now that we started playing it.
 		trackPredictor.predictNextTrack(true)
+		onDurationAvailable(mp.durationMillis)
 		maybeCleanupPool()
 	}
 
@@ -1044,5 +1052,11 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 			throw IllegalStateException("Non-active media player has live data")
 		}
 		onLiveInfoAvailable(text)
+	}
+
+	override fun onDurationAvailable(mp: MediaPlayerState, durationMillis: Long) {
+		if (mp == mediaPlayer) {
+			onDurationAvailable(durationMillis)
+		}
 	}
 }

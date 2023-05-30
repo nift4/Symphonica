@@ -25,7 +25,9 @@ import android.os.IBinder
 import org.akanework.symphonica.MainActivity
 import org.akanework.symphonica.MainActivity.Companion.playlistViewModel
 import org.akanework.symphonica.SymphonicaApplication.Companion.context
+import org.akanework.symphonica.logic.data.Song
 import org.akanework.symphonica.logic.util.MusicPlayer
+import org.akanework.symphonica.logic.util.Playlist
 import org.akanework.symphonica.logic.util.broadcastMetaDataUpdate
 import org.akanework.symphonica.logic.util.broadcastPlayPaused
 import org.akanework.symphonica.logic.util.broadcastPlayStart
@@ -59,11 +61,11 @@ import org.akanework.symphonica.logic.util.prevSong
  */
 class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
 
-    private val musicPlayer = MusicPlayer(context)
+    private val musicPlayer = MusicPlayer<Song>(context)
 
     private val mediaSessionCallback = object : MediaSession.Callback() {
         override fun onSeekTo(pos: Long) {
-            musicPlayer?.seekTo(pos.toInt())
+            musicPlayer.seekTo(pos)
 
             broadcastSliderSeek()
         }
@@ -119,7 +121,7 @@ class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
             }
 
             "ACTION_JUMP" -> {
-                musicPlayer.jump(playlistViewModel.currentLocation)
+                musicPlayer.playlist?.currentPosition = playlistViewModel.currentLocation
             }
         }
         return super.onStartCommand(intent, flags, startId)
@@ -128,6 +130,7 @@ class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
     private fun startPlaying() {
         if (musicPlayer != null) {
             killMiniPlayer()
+            musicPlayer.playlist = Playlist(playlistViewModel.playList)
             musicPlayer!!.play()
             broadcastPlayStart()
             /*mediaSession.isActive = true
