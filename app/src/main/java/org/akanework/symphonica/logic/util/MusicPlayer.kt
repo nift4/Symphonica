@@ -136,6 +136,7 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 				}
 			}
 		}
+	private var handledPositionChange = false
 	private var playing = false
 	private var userPlaying = false
 	private var seekable = false
@@ -219,7 +220,14 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 
 	private fun getNextItem(consume: Boolean): Playable? {
 		return playlist?.getItem(getNextPosition().also {
-			if (consume) it?.let { playlist?.currentPosition = it }
+			if (consume) it?.let {
+				// If someone sets currentPosition, we usually update media player state.
+				// There however is one case where it is undesirable, and that is when media player
+				// tells us that it advanced to the next song normally. We need to catch this and
+				// just update the next song prediction in that case.
+				handledPositionChange = true
+				playlist?.currentPosition = it
+			}
 		})
 	}
 
@@ -237,7 +245,7 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 			npos = pos
 			if (npos!! < 0 || npos!! >= it.size) {
 				npos = if (loopingMode == LoopingMode.LOOPING_MODE_PLAYLIST) {
-					npos!!.mod(it.size) // % is rem, not mod, dont use it here
+					npos!!.mod(it.size) // % is rem, not mod, don't use it here
 				} else null
 			}
 		}
@@ -248,8 +256,12 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 		dispatchSeek(positionMills)
 	}
 
-	fun destroy() {
+	/**
+	 * This method does clean up, but this object can still be re-used afterwards.
+	 */
+	fun recycle() {
 		hasConsumedFirst = false
+		playlist = null
 		mediaPlayer.destroy()
 	}
 
@@ -258,9 +270,13 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 	}
 
 	override fun onPlaylistPositionChanged(oldPosition: Int, newPosition: Int) {
-		// TODO this is wrong
-		hasConsumedFirst = getNextPosition(oldPosition) == newPosition
-		dispatchPredictionChange(!hasConsumedFirst)
+		if (handledPositionChange) {
+			handledPositionChange = false
+			dispatchPredictionChange(false)
+		} else {
+			hasConsumedFirst = false
+			dispatchPredictionChange(true)
+		}
 	}
 
 	override fun onPlaylistItemAdded(position: Int) {

@@ -285,7 +285,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	}
 
 	fun destroy() {
-		assertNotState(StateDiagram.BUSY, StateDiagram.END, StateDiagram.STARTED)
+		assertNotState(StateDiagram.BUSY, StateDiagram.END)
 		state = StateDiagram.BUSY
 		cleanup()
 		mediaPlayer.release()
@@ -293,7 +293,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	}
 
 	fun recycle() {
-		assertNotState(StateDiagram.BUSY, StateDiagram.END, StateDiagram.STARTED)
+		assertNotState(StateDiagram.BUSY, StateDiagram.END)
 		if (state != StateDiagram.IDLE) {
 			state = StateDiagram.BUSY
 			cleanup()
@@ -513,13 +513,13 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 
 	private fun assertNotState(vararg badStates: StateDiagram) {
 		if (badStates.any { state == it }) {
-			throw IllegalStateException("Current state $state is in list of disallowed states: $badStates")
+			throw IllegalStateException("Current state $state is in list of disallowed states: ${badStates.contentDeepToString()}")
 		}
 	}
 
 	private fun assertState(vararg goodStates: StateDiagram) {
 		if (!goodStates.any { state == it }) {
-			throw IllegalStateException("Current state $state is not in list of allowed states: $goodStates")
+			throw IllegalStateException("Current state $state is not in list of allowed states: ${goodStates.contentDeepToString()}")
 		}
 	}
 }
@@ -827,7 +827,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 
 	fun destroy() {
 		stop()
-		for (i in 0..mediaPlayerPool.size) {
+		for (i in 1..mediaPlayerPool.size) {
 			mediaPlayerPool.removeFirst().destroy()
 		}
 	}
@@ -873,21 +873,31 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 		}
 		nextMediaPlayer = null
 		if (currentSongImpacted) {
-			skip()
-		}
-		mediaPlayer?.setNext(
-			if (trackPredictor.isLooping())
-				mediaPlayer
-			else {
-				val playable = trackPredictor.predictNextTrack(false)
-				if (playable != null) {
-					nextMediaPlayer = getNextRecycledMediaPlayer()
-					nextMediaPlayer?.initialize(playable)
-					nextMediaPlayer?.preload(true)
-					nextMediaPlayer
-				} else null
+			// We consume the song we are about to play, and will get next prediction updated after
+			// that, so don't do it twice.
+			mediaPlayer?.let {
+				it.recycle()
+				mediaPlayerPool.add(it)
 			}
-		)
+			mediaPlayer = null
+			skip()
+		} else {
+			// We want to crash if mediaPlayer is null, as that means there's a bug somewhere.
+			// (e.g. mediaPlayer is null when we call predictNextTrack(consume = true) or similar)
+			mediaPlayer!!.setNext(
+				if (trackPredictor.isLooping())
+					mediaPlayer
+				else {
+					val playable = trackPredictor.predictNextTrack(false)
+					if (playable != null) {
+						nextMediaPlayer = getNextRecycledMediaPlayer()
+						nextMediaPlayer?.initialize(playable)
+						nextMediaPlayer?.preload(true)
+						nextMediaPlayer
+					} else null
+				}
+			)
+		}
 	}
 
 	/**
@@ -895,16 +905,23 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 	 * current song is no longer played (e.g. user is now playing another song).
 	 */
 	private fun skip() {
-		timestamp = null
-		if (nextMediaPlayer == null) {
-			val playable = trackPredictor.predictNextTrack(true)
-			if (playable != null) {
-				nextMediaPlayer = getNextRecycledMediaPlayer()
-				nextMediaPlayer?.initialize(playable)
-			}
+		if (mediaPlayer != null) {
+			throw IllegalStateException("mediaPlayer != null, recycle it before calling skip()")
 		}
+		timestamp = null
 		mediaPlayer = nextMediaPlayer
 		nextMediaPlayer = null
+		if (mediaPlayer == null) {
+			// mediaPlayer must be non-null when consume=true to allow setNext() to work, but we
+			// first have to call initialize() to get setNext() to work... Thank god this stuff is
+			// all abstracted away here...
+			val playable = trackPredictor.predictNextTrack(false)
+			if (playable != null) {
+				mediaPlayer = getNextRecycledMediaPlayer()
+				mediaPlayer?.initialize(playable)
+				trackPredictor.predictNextTrack(true)
+			}
+		}
 		if (mediaPlayer != null) {
 			mediaPlayer?.updatePlaybackSettings(volume, speed, pitch)
 			if (playing) {
@@ -942,6 +959,8 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 		if (mp == mediaPlayer || mp == nextMediaPlayer) {
 			if (mp == mediaPlayer) {
 				mediaPlayer = null
+				// We just use our nextMediaPlayer if available, as we skip() to the NEXT song in
+				// this case.
 				skip()
 			} else {
 				nextMediaPlayer = null
