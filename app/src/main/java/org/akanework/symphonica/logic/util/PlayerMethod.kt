@@ -18,7 +18,6 @@
 package org.akanework.symphonica.logic.util
 
 import android.content.Intent
-import org.akanework.symphonica.MainActivity.Companion.musicPlayer
 import org.akanework.symphonica.MainActivity.Companion.playlistViewModel
 import org.akanework.symphonica.SymphonicaApplication
 import org.akanework.symphonica.logic.data.Song
@@ -45,12 +44,6 @@ fun addToNext(nextSong: Song) {
     } else {
         playlistViewModel.playList.add(playlistViewModel.currentLocation, nextSong)
     }
-    if (musicPlayer == null) {
-        if (playlistViewModel.playList.size != 1) {
-            playlistViewModel.currentLocation++
-        }
-        thisSong()
-    }
 }
 
 /**
@@ -67,9 +60,6 @@ fun jumpTo(index: Int) {
  * [nextSong] will jump to the next song in the playlist.
  */
 fun nextSong() {
-    if (musicPlayer != null && !musicPlayer!!.isPlaying) {
-        thisSong()
-    }
     val intent = Intent(SymphonicaApplication.context, SymphonicaPlayerService::class.java)
     intent.action = "ACTION_NEXT"
     SymphonicaApplication.context.startService(intent)
@@ -95,31 +85,11 @@ fun prevSong() {
 }
 
 /**
- * [pausePlayer] pauses [SymphonicaPlayerService]'s player.
- */
-fun pausePlayer() {
-    val intent = Intent(SymphonicaApplication.context, SymphonicaPlayerService::class.java)
-    intent.action = "ACTION_PAUSE"
-    SymphonicaApplication.context.startService(intent)
-}
-
-/**
- * [resumePlayer] resumes [SymphonicaPlayerService]'s player.
- */
-fun resumePlayer() {
-    val intent = Intent(SymphonicaApplication.context, SymphonicaPlayerService::class.java)
-    intent.action = "ACTION_RESUME"
-    SymphonicaApplication.context.startService(intent)
-}
-
-/**
  * [changePlayerStatus] changes [SymphonicaPlayerService]'s
  * player status. If paused then play. If is playing then pause.
  */
 fun changePlayerStatus() {
-    if (musicPlayer != null && musicPlayer!!.isPlaying) {
-        pausePlayer()
-    } else {
-        resumePlayer()
-    }
+    val intent = Intent(SymphonicaApplication.context, SymphonicaPlayerService::class.java)
+    intent.action = "ACTION_PLAY_PAUSE"
+    SymphonicaApplication.context.startService(intent)
 }

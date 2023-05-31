@@ -41,8 +41,12 @@ import org.akanework.symphonica.MainActivity.Companion.musicPlayer
 import org.akanework.symphonica.MainActivity.Companion.playlistViewModel
 import org.akanework.symphonica.R
 import org.akanework.symphonica.SymphonicaApplication.Companion.context
+import org.akanework.symphonica.logic.data.Song
 import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.notification
 import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.updateMetadata
+import org.akanework.symphonica.logic.util.MediaStateCallback
+import org.akanework.symphonica.logic.util.Playlist
+import org.akanework.symphonica.logic.util.PlaylistCallbacks
 import org.akanework.symphonica.logic.util.broadcastMetaDataUpdate
 import org.akanework.symphonica.logic.util.broadcastPlayPaused
 import org.akanework.symphonica.logic.util.broadcastPlayStart
@@ -78,7 +82,12 @@ import kotlin.random.Random
  * 5. "ACTION_PREV" similar to "ACTION_NEXT".
  * 6. "ACTION_JUMP" will jump to target song inside the playlist.
  */
-class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
+class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks<Song> {
+
+    init {
+        musicPlayer.addMediaStateCallback(this)
+        musicPlayer.registerPlaylistCallback(this)
+    }
 
     companion object {
 
@@ -96,13 +105,13 @@ class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
 
                 0 -> playbackStateBuilder.setState(
                     PlaybackState.STATE_PLAYING,
-                    musicPlayer!!.currentPosition.toLong(),
+                    musicPlayer!!.currentTimestamp.toLong(),
                     1.0f
                 )
 
                 1 -> playbackStateBuilder.setState(
                     PlaybackState.STATE_PAUSED,
-                    if (musicPlayer != null) musicPlayer!!.currentPosition.toLong() else 0,
+                    if (musicPlayer != null) musicPlayer!!.currentTimestamp.toLong() else 0,
                     0.0f
                 )
 
@@ -204,7 +213,7 @@ class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
 
     private val mediaSessionCallback = object : MediaSession.Callback() {
         override fun onSeekTo(pos: Long) {
-            musicPlayer?.seekTo(pos.toInt())
+            musicPlayer?.seekTo(pos)
 
             broadcastSliderSeek()
         }
@@ -239,27 +248,13 @@ class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
     }
 
     override fun onBind(intent: Intent?): IBinder? {
-        TODO("Not yet implemented")
-    }
-
-
-    override fun onPrepared(mp: MediaPlayer) {
-        mp.start()
-        mediaSession.isActive = true
-        mediaSession.setCallback(mediaSessionCallback)
-        updateMetadata()
+        return null
     }
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
         when (intent.action) {
             "ACTION_REPLACE_AND_PLAY" -> {
-                if (musicPlayer == null) {
-                    musicPlayer = MediaPlayer()
-                    setLoopListener()
-                    startPlaying()
-                } else {
-                    stopAndPlay()
-                }
+                stopAndPlay()
             }
 
             "ACTION_PAUSE" -> {
@@ -271,18 +266,12 @@ class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
 
             "ACTION_RESUME" -> {
                 if (musicPlayer != null && !musicPlayer!!.isPlaying) {
-                    musicPlayer!!.start()
-                    broadcastPlayStart()
-                    if (MainActivity.managerSymphonica.activeNotifications.isEmpty()) {
-                        mediaSession.setCallback(mediaSessionCallback)
-                    }
-                    killMiniPlayer()
+                    musicPlayer!!.play()
                 }
             }
 
             "ACTION_NEXT" -> {
                 if (musicPlayer != null) {
-                    musicPlayer!!.reset()
                     nextSongDecisionMaker()
                     startPlaying()
                 }
@@ -290,72 +279,25 @@ class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
 
             "ACTION_PREV" -> {
                 if (musicPlayer != null) {
-                    musicPlayer!!.reset()
                     prevSongDecisionMaker()
                     startPlaying()
                 }
             }
 
             "ACTION_JUMP" -> {
-                if (musicPlayer != null) {
-                    stopAndPlay()
-                } else {
-                    musicPlayer = MediaPlayer()
-                    setLoopListener()
-                    startPlaying()
-                }
+                stopAndPlay()
             }
         }
         return super.onStartCommand(intent, flags, startId)
     }
 
     private fun startPlaying() {
-        if (musicPlayer != null) {
-            killMiniPlayer()
-            musicPlayer!!.apply {
-                setDataSource(
-                    applicationContext, playlistViewModel.playList[
-                        playlistViewModel.currentLocation
-                    ].path.toUri()
-                )
-                setOnPreparedListener(this@SymphonicaPlayerService)
-                prepareAsync()
-                broadcastPlayStart()
-                if (MainActivity.managerSymphonica.activeNotifications.isEmpty()) {
-                    mediaSession.setCallback(mediaSessionCallback)
-                }
-                setLoopListener()
-            }
-        }
+        musicPlayer!!.playlist = Playlist(playlistViewModel.playList)
     }
 
     private fun stopAndPlay() {
-        musicPlayer!!.reset()
+        musicPlayer!!.pause()
         startPlaying()
-    }
-
-    private fun setLoopListener() {
-        musicPlayer!!.setOnCompletionListener {
-            nextSongDecisionMaker()
-            if (musicPlayer != null) {
-                musicPlayer!!.reset()
-                musicPlayer!!.apply {
-                    setDataSource(
-                        applicationContext, playlistViewModel.playList[
-                            playlistViewModel.currentLocation
-                        ].path.toUri()
-                    )
-                    setOnPreparedListener(this@SymphonicaPlayerService)
-                    prepareAsync()
-                    broadcastPlayStart()
-                    if (MainActivity.managerSymphonica.activeNotifications.isEmpty()) {
-                        mediaSession.setCallback(mediaSessionCallback)
-                    }
-                    setLoopListener()
-                    killMiniPlayer()
-                }
-            }
-        }
     }
 
     private fun killMiniPlayer() {
@@ -367,9 +309,7 @@ class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
     }
 
     private fun stopPlaying() {
-        musicPlayer!!.reset()
-        musicPlayer!!.release()
-        musicPlayer = null
+        musicPlayer!!.recycle()
         broadcastPlayStopped()
         broadcastMetaDataUpdate()
     }
@@ -439,6 +379,75 @@ class SymphonicaPlayerService : Service(), MediaPlayer.OnPreparedListener {
                 }
         }
         updatePlaylistSheetLocation(previousLocation)
+        musicPlayer.playlist?.currentPosition = playlistViewModel.currentLocation
+    }
+
+    override fun onPlayingStatusChanged(playing: Boolean) {
+        mediaSession.isActive = playing
+        mediaSession.setCallback(mediaSessionCallback)
+        updateMetadata()
+        broadcastPlayStart()
+        if (MainActivity.managerSymphonica.activeNotifications.isEmpty()) {
+            mediaSession.setCallback(mediaSessionCallback)
+        }
+    }
+
+    override fun onUserPlayingStatusChanged(playing: Boolean) {
+        if (playing) {
+            killMiniPlayer()
+        }
+    }
+
+    override fun onLiveInfoAvailable(text: String) {
+        // TODO
+    }
+
+    override fun onMediaTimestampChanged(timestampMillis: Long) {
+        // TODO
+    }
+
+    override fun onSetSeekable(seekable: Boolean) {
+        // TODO
+    }
+
+    override fun onMediaBufferSlowStatus(slowBuffer: Boolean) {
+        // TODO
+    }
+
+    override fun onMediaBufferProgress(progress: Float) {
+        // TODO
+    }
+
+    override fun onMediaHasDecreasedPerformance() {
+        // TODO
+    }
+
+    override fun onPlaybackError(what: Int) {
+        // TODO
+    }
+
+    override fun onDurationAvailable(durationMillis: Long) {
+        // TODO
+    }
+
+    override fun onPlaybackSettingsChanged(volume: Float, speed: Float, pitch: Float) {
+        // TODO
+    }
+
+    override fun onPlaylistReplaced(oldPlaylist: Playlist<Song>?, newPlaylist: Playlist<Song>?) {
+        // TODO
+    }
+
+    override fun onPlaylistPositionChanged(oldPosition: Int, newPosition: Int) {
+        // TODO
+    }
+
+    override fun onPlaylistItemAdded(position: Int) {
+        // TODO
+    }
+
+    override fun onPlaylistItemRemoved(position: Int) {
+        // TODO
     }
 
 }

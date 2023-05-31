@@ -63,9 +63,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.akanework.symphonica.SymphonicaApplication.Companion.context
+import org.akanework.symphonica.logic.data.Song
 import org.akanework.symphonica.logic.data.loadDataFromDisk
 import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.setPlaybackState
 import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.updateMetadata
+import org.akanework.symphonica.logic.util.MediaStateCallback
+import org.akanework.symphonica.logic.util.Playlist
+import org.akanework.symphonica.logic.util.PlaylistCallbacks
 import org.akanework.symphonica.logic.util.broadcastMetaDataUpdate
 import org.akanework.symphonica.logic.util.broadcastSliderSeek
 import org.akanework.symphonica.logic.util.changePlayerStatus
@@ -87,7 +91,7 @@ import org.akanework.symphonica.ui.viewmodel.PlaylistViewModel
  * Google said, let there be fragments, so akane answered:
  * "There would be fragments."
  */
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<Song> {
 
     private val permissionRequestCode = 123
 
@@ -138,11 +142,11 @@ class MainActivity : AppCompatActivity() {
                 // about the "/ 1000 + 0.2f", check line 396.
                 fullSheetSlider.valueTo = musicPlayer!!.duration.toFloat() / 1000
 
-                if (!isUserTracking && musicPlayer!!.currentPosition.toFloat() / 1000 <= fullSheetSlider.valueTo) {
-                    fullSheetSlider.value = musicPlayer!!.currentPosition.toFloat() / 1000
+                if (!isUserTracking && musicPlayer!!.currentTimestamp.toFloat() / 1000 <= fullSheetSlider.valueTo) {
+                    fullSheetSlider.value = musicPlayer!!.currentTimestamp.toFloat() / 1000
 
                     fullSheetTimeStamp.text =
-                        convertDurationToTimeStamp(musicPlayer!!.currentPosition.toString())
+                        convertDurationToTimeStamp(musicPlayer!!.currentTimestamp.toString())
                 }
 
                 // Update it per 200ms.
@@ -192,7 +196,7 @@ class MainActivity : AppCompatActivity() {
         var isAkaneVisible: Boolean = false
 
         // This is the core of Symphonica, the music player.
-        var musicPlayer: MediaPlayer? = null
+        var musicPlayer = context.musicPlayer
 
         // This is the animator needed in companion functions.
         lateinit var animator: ObjectAnimator
@@ -272,6 +276,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    }
+
+    init {
+        musicPlayer.addMediaStateCallback(this)
+        musicPlayer.registerPlaylistCallback(this)
     }
 
     private fun updateAlbumView(view: View) {
@@ -652,7 +661,7 @@ class MainActivity : AppCompatActivity() {
                 // when the number is too big (like when toValue
                 // used the duration directly) we might encounter
                 // some performance problem.
-                musicPlayer?.seekTo((slider.value * 1000).toInt())
+                musicPlayer?.seekTo((slider.value * 1000).toLong())
 
                 broadcastSliderSeek()
 
@@ -755,9 +764,9 @@ class MainActivity : AppCompatActivity() {
         if (musicPlayer != null && !musicPlayer!!.isPlaying) {
             fullSheetSlider.isEnabled = true
             fullSheetSlider.valueTo = musicPlayer!!.duration.toFloat() / 1000
-            fullSheetSlider.value = musicPlayer!!.currentPosition.toFloat() / 1000
+            fullSheetSlider.value = musicPlayer!!.currentTimestamp.toFloat() / 1000
             fullSheetTimeStamp.text =
-                convertDurationToTimeStamp(musicPlayer!!.currentPosition.toString())
+                convertDurationToTimeStamp(musicPlayer!!.currentTimestamp.toString())
         }
     }
 
@@ -951,6 +960,66 @@ class MainActivity : AppCompatActivity() {
                 updateMetadata()
             }
         }
+    }
+
+    override fun onPlaylistReplaced(oldPlaylist: Playlist<Song>?, newPlaylist: Playlist<Song>?) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onPlaylistPositionChanged(oldPosition: Int, newPosition: Int) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onPlaylistItemAdded(position: Int) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onPlaylistItemRemoved(position: Int) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onPlayingStatusChanged(playing: Boolean) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onUserPlayingStatusChanged(playing: Boolean) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onLiveInfoAvailable(text: String) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onMediaTimestampChanged(timestampMillis: Long) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onSetSeekable(seekable: Boolean) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onMediaBufferSlowStatus(slowBuffer: Boolean) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onMediaBufferProgress(progress: Float) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onMediaHasDecreasedPerformance() {
+        TODO("Not yet implemented")
+    }
+
+    override fun onPlaybackError(what: Int) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onDurationAvailable(durationMillis: Long) {
+        TODO("Not yet implemented")
+    }
+
+    override fun onPlaybackSettingsChanged(volume: Float, speed: Float, pitch: Float) {
+        TODO("Not yet implemented")
     }
 
 }
