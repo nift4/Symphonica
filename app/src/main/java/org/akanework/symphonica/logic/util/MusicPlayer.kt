@@ -1,6 +1,7 @@
 package org.akanework.symphonica.logic.util
 
 import android.content.Context
+import android.os.SystemClock
 
 enum class LoopingMode {
 	LOOPING_MODE_NONE, LOOPING_MODE_PLAYLIST, LOOPING_MODE_TRACK
@@ -137,21 +138,28 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 			}
 		}
 	private var handledPositionChange = false
-	private var playing = false
-	private var userPlaying = false
-	private var seekable = false
-	private var timestampMillis = 0L
-	private var trackDuration = 0L
-	val isPlaying
-		get() = playing
-	val isUserPlaying
-		get() = userPlaying
-	val isSeekable
-		get() = seekable
-	val currentTimestamp
-		get() = timestampMillis
-	val duration
-		get() = trackDuration
+	var isPlaying = false
+		private set
+	var isUserPlaying = false
+		private set
+	var isSeekable = false
+		private set
+	var currentTimestamp = 0L
+		private set
+	var duration = 0L
+		private set
+	var decreasedPerformance = false
+		private set
+	var slowBuffer = false
+		private set
+	var bufferProgress = 0f
+		private set
+	var liveInfo: String? = null
+		private set
+	var timestampBase: Timestamp? = null
+		private set
+	var timestampUpdateTime = 0L
+		private set
 	var playlist: Playlist<T>? = null
 		set(value) {
 			if (field != value) {
@@ -165,9 +173,9 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 
 
 	init {
-		mediaPlayer.setNextTrackPredictor(this)
 		addMediaStateCallback(this)
 		registerPlaylistCallback(this)
+		mediaPlayer.setNextTrackPredictor(this)
 		dispatchPlaybackSettings(volume, speed, pitch)
 	}
 
@@ -189,13 +197,13 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 	}
 
 	fun play() {
-		if (!playing) {
+		if (!isPlaying) {
 			playOrPause()
 		}
 	}
 
 	fun pause() {
-		if (playing) {
+		if (isPlaying) {
 			playOrPause()
 		}
 	}
@@ -270,6 +278,7 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 	}
 
 	override fun onPlaylistPositionChanged(oldPosition: Int, newPosition: Int) {
+		this.decreasedPerformance = false
 		if (handledPositionChange) {
 			handledPositionChange = false
 			dispatchPredictionChange(false)
@@ -292,35 +301,40 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 	}
 
 	override fun onPlayingStatusChanged(playing: Boolean) {
-		this.playing = playing
+		this.isPlaying = playing
 	}
 
 	override fun onUserPlayingStatusChanged(playing: Boolean) {
-		userPlaying = playing
+		this.isUserPlaying = playing
 	}
 
 	override fun onLiveInfoAvailable(text: String) {
-		// Let UI bother with this.
+		this.liveInfo = text
 	}
 
 	override fun onMediaTimestampChanged(timestampMillis: Long) {
-		this.timestampMillis = timestampMillis
+		this.currentTimestamp = timestampMillis
+	}
+
+	override fun onMediaTimestampBaseChanged(timestampBase: Timestamp) {
+		this.timestampBase = timestampBase
+		this.timestampUpdateTime = SystemClock.elapsedRealtime()
 	}
 
 	override fun onSetSeekable(seekable: Boolean) {
-		this.seekable = seekable
+		this.isSeekable = seekable
 	}
 
 	override fun onMediaBufferSlowStatus(slowBuffer: Boolean) {
-		// Let UI bother with this.
+		this.slowBuffer = slowBuffer
 	}
 
 	override fun onMediaBufferProgress(progress: Float) {
-		// Let UI bother with this.
+		this.bufferProgress = progress
 	}
 
 	override fun onMediaHasDecreasedPerformance() {
-		// Let UI bother with this.
+		this.decreasedPerformance = true
 	}
 
 	override fun onPlaybackError(what: Int) {
@@ -328,7 +342,7 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 	}
 
 	override fun onDurationAvailable(durationMillis: Long) {
-		trackDuration = durationMillis
+		this.duration = durationMillis
 	}
 
 	override fun onPlaybackSettingsChanged(volume: Float, speed: Float, pitch: Float) {
@@ -339,6 +353,8 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 
 	fun registerPlaylistCallback(callback: PlaylistCallbacks<T>) {
 		playlistCallbacks.registerPlaylistCallback(callback)
+		callback.onPlaylistReplaced(null, playlist)
+		callback.onPlaylistPositionChanged(0, playlist?.currentPosition ?: 0)
 	}
 
 	fun unregisterPlaylistCallback(callback: PlaylistCallbacks<T>) {
@@ -347,6 +363,14 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 
 	fun addMediaStateCallback(callback: MediaStateCallback) {
 		mediaPlayer.addMediaStateCallback(callback)
+		callback.onSetSeekable(isSeekable)
+		callback.onMediaBufferProgress(0f)
+		callback.onMediaBufferSlowStatus(false)
+		callback.onPlaybackSettingsChanged(volume, speed, pitch)
+		callback.onPlayingStatusChanged(isPlaying)
+		callback.onUserPlayingStatusChanged(isUserPlaying)
+		timestampBase?.let { callback.onMediaTimestampBaseChanged(it) }
+		callback.onMediaTimestampChanged(currentTimestamp)
 	}
 
 	fun removeMediaStateCallback(callback: MediaStateCallback) {

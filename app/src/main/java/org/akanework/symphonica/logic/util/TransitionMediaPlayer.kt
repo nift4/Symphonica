@@ -15,7 +15,14 @@ import android.util.Log
 import java.lang.IllegalArgumentException
 
 class Timestamp(val systemAnchorTimeNano: Long, val mediaAnchorTimeMillis: Long,
-                val playbackSpeed: Float)
+                val playbackSpeed: Float) {
+	override fun toString(): String {
+		return "Timestamp{" +
+				"systemAnchorTimeNano=$systemAnchorTimeNano, " +
+				"mediaAnchorTimeMillis=$mediaAnchorTimeMillis, " +
+				"playbackSpeed=$playbackSpeed}"
+	}
+}
 
 class MediaPlayerState(private val applicationContext: Context, private val handler: Handler,
                        private val playbackAttrs: AudioAttributes, private val callback: Callback)
@@ -63,6 +70,8 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		fun onLiveDataAvailable(mp: MediaPlayerState, text: String)
 		// Called when duration became known
 		fun onDurationAvailable(mp: MediaPlayerState, durationMillis: Long)
+		// Called when seek is done
+		fun onSeekCompleted(mp: MediaPlayerState)
 	}
 
 	companion object {
@@ -72,11 +81,19 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	private val mediaPlayer = MediaPlayer()
 	private var state = StateDiagram.IDLE
 	private var prepareListener: Runnable? = null
+		set(value) {
+			if (field != null && value != null) {
+				throw IllegalStateException("overwriting non-null preparelistener")
+			}
+			field = value
+		}
 	private val liveDataCallbacks: ArrayList<Runnable> = ArrayList()
 	val durationMillis: Long
 		get() = mediaPlayer.duration.toLong()
 	val currentPosition: Long
 		get() = mediaPlayer.currentPosition.toLong()
+	private var seeking = -1L
+	private var seekingDesired = -1L
 	private var volume = 0f
 	private var pitch = 0f
 	private var speed = 0f
@@ -123,7 +140,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 				return true
 			}
 		} else if (what == -38) {
-			// -38 == -ENOSYS, which in Android means INVALID_OPERATION, it means it's a bug in our code
+			// -38 == -ENOSYS, Android means INVALID_OPERATION, it means it's a bug in our code
 			throw IllegalStateException("Illegal state transition in MediaPlayer")
 		}
 		// This error is new/unknown/vendor extension
@@ -141,8 +158,16 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	}
 
 	override fun onSeekComplete(mp: MediaPlayer) {
+		val seekingReal = seeking
+		seeking = -1
 		if (state != StateDiagram.BUSY) {
-			assertState(StateDiagram.STARTED)
+			assertState(StateDiagram.STARTED, StateDiagram.PAUSED)
+			if (seekingReal != seekingDesired) {
+				seek(seekingDesired)
+			} else {
+				seekingDesired = -1
+				onSeekCompleted()
+			}
 			// On Android versions older than P, we would send timestamp event here (and in other
 			// places), because OnMediaTimeDiscontinuityListener doesn't exist on these versions
 		}
@@ -227,7 +252,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	@Suppress("Deprecation")
 	override fun onMediaTimeDiscontinuity(mp: MediaPlayer, mts: MediaTimestamp) {
 		if (state != StateDiagram.BUSY) {
-			assertState(StateDiagram.STARTED)
+			assertState(StateDiagram.STARTED, StateDiagram.PAUSED)
 			val ts = Timestamp(
 				if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P)
 					mts.anchorSytemNanoTime
@@ -242,8 +267,8 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		if (state != StateDiagram.BUSY) {
 			assertState(StateDiagram.PREPARING)
 			state = StateDiagram.PREPARED
-			onDurationAvailable(durationMillis)
 			prepareListener?.run()
+			onDurationAvailable(durationMillis)
 		}
 	}
 
@@ -325,7 +350,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	fun updatePlaybackSettings(volume: Float, speed: Float, pitch: Float) {
 		if ((state == StateDiagram.STARTED && speed > 0f)
 			|| (state == StateDiagram.PAUSED && speed == 0f)) {
-			// Avoid implicit start/pause
+			// Avoid implicit start/pause, see setPlaybackParams javadoc
 			syncPlaybackSettings()
 		}
 		this.volume = volume
@@ -340,12 +365,12 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		playbackParams.audioFallbackMode = PlaybackParams.AUDIO_FALLBACK_MODE_FAIL
 		try {
 			mediaPlayer.playbackParams = playbackParams
-			setVolume(volume)
 		} catch (ex: IllegalArgumentException) {
 			Log.e(TAG, Log.getStackTraceString(ex))
 			onInternalPlaybackError(MediaPlayer.MEDIA_ERROR_UNSUPPORTED)
 			recycleSelf()
 		}
+		setVolume(volume)
 		// On Android versions older than P, we would send timestamp event here (and in other
 		// places), because OnMediaTimeDiscontinuityListener doesn't exist on these versions
 	}
@@ -375,6 +400,10 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 	}
 
 	fun seek(newPosMillis: Long) {
+		if (seeking == -1L) {
+			seeking = newPosMillis
+		}
+		seekingDesired = newPosMillis
 		mediaPlayer.seekTo(newPosMillis, MediaPlayer.SEEK_PREVIOUS_SYNC)
 	}
 
@@ -404,6 +433,7 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		if (mp == this) {
 			// If we are the next player, just pretend to loop till we aren't anymore.
 			mediaPlayer.isLooping = true
+			mediaPlayer.setNextMediaPlayer(null)
 		} else {
 			mediaPlayer.isLooping = false
 			if (mp != null && mp.state == StateDiagram.PREPARING) {
@@ -511,6 +541,12 @@ class MediaPlayerState(private val applicationContext: Context, private val hand
 		}
 	}
 
+	private fun onSeekCompleted() {
+		handler.post {
+			callback.onSeekCompleted(this)
+		}
+	}
+
 	private fun assertNotState(vararg badStates: StateDiagram) {
 		if (badStates.any { state == it }) {
 			throw IllegalStateException("Current state $state is in list of disallowed states: ${badStates.contentDeepToString()}")
@@ -580,6 +616,7 @@ interface MediaStateCallback {
 	fun onUserPlayingStatusChanged(playing: Boolean)
 	fun onLiveInfoAvailable(text: String)
 	fun onMediaTimestampChanged(timestampMillis: Long)
+	fun onMediaTimestampBaseChanged(timestampBase: Timestamp)
 	fun onSetSeekable(seekable: Boolean)
 	fun onMediaBufferSlowStatus(slowBuffer: Boolean)
 	fun onMediaBufferProgress(progress: Float)
@@ -589,7 +626,7 @@ interface MediaStateCallback {
 	fun onPlaybackSettingsChanged(volume: Float, speed: Float, pitch: Float)
 
 	open class Dispatcher : MediaStateCallback {
-		private val callbacks: HashSet<MediaStateCallback> = HashSet()
+		private val callbacks: ArrayList<MediaStateCallback> = ArrayList()
 
 		fun addMediaStateCallback(callback: MediaStateCallback) {
 			callbacks.add(callback)
@@ -613,6 +650,10 @@ interface MediaStateCallback {
 
 		override fun onMediaTimestampChanged(timestampMillis: Long) {
 			callbacks.forEach { it.onMediaTimestampChanged(timestampMillis) }
+		}
+
+		override fun onMediaTimestampBaseChanged(timestampBase: Timestamp) {
+			callbacks.forEach { it.onMediaTimestampBaseChanged(timestampBase) }
 		}
 
 		override fun onSetSeekable(seekable: Boolean) {
@@ -724,7 +765,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 				}
 			}
 		}
-	private var seekable = true
+	private var seekable = false
 		set(value) {
 			if (value != field) {
 				field = value
@@ -740,7 +781,10 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 				field = value
 				handler.removeCallbacks(timestampUpdater)
 				if (value != null) {
-					handler.post(timestampUpdater)
+					handler.post {
+						timestampUpdater.run()
+						onMediaTimestampBaseChanged(value)
+					}
 				}
 			}
 		}
@@ -773,16 +817,21 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 				ignoreAudioFocus = true
 				return
 			}
+			if (playing) {
+				throw IllegalStateException("playing=true but userPlaying=false")
+			}
 			userPlaying = true
-			if (playing) return // should never happen, but well
-			if (!ignoreAudioFocus) {
+			if (!ignoreAudioFocus && !hasAudioFocus) {
 				val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
 					.setAudioAttributes(playbackAttributes)
 					.setAcceptsDelayedFocusGain(true)
 					.setWillPauseWhenDucked(false)
 					.setOnAudioFocusChangeListener(this, handler)
 					.build()
-				audioManager.requestAudioFocus(focusRequest)
+				val value = audioManager.requestAudioFocus(focusRequest)
+				if (value == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+					onAudioFocusChange(AudioManager.AUDIOFOCUS_GAIN)
+				}
 			} else {
 				realPlay()
 			}
@@ -1076,6 +1125,15 @@ class TransitionMediaPlayer(private val applicationContext: Context) : MediaStat
 	override fun onDurationAvailable(mp: MediaPlayerState, durationMillis: Long) {
 		if (mp == mediaPlayer) {
 			onDurationAvailable(durationMillis)
+		}
+	}
+
+	override fun onSeekCompleted(mp: MediaPlayerState) {
+		if (mp == mediaPlayer && !playing) {
+			// semi-hack-ish, because we don't get new timestamp events if paused
+			// MediaPlayer will update it accurately the moment someone presses play
+			timestamp = Timestamp(System.nanoTime(), mp.currentPosition, speed)
+			onMediaTimestampChanged(mp.currentPosition)
 		}
 	}
 }
