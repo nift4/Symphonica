@@ -32,7 +32,6 @@ import org.akanework.symphonica.MainActivity.Companion.booleanViewModel
 import org.akanework.symphonica.MainActivity.Companion.diskCacheStrategyCustom
 import org.akanework.symphonica.MainActivity.Companion.fullSheetShuffleButton
 import org.akanework.symphonica.MainActivity.Companion.libraryViewModel
-import org.akanework.symphonica.MainActivity.Companion.playlistViewModel
 import org.akanework.symphonica.R
 import org.akanework.symphonica.SymphonicaApplication
 import org.akanework.symphonica.logic.data.Song
@@ -91,13 +90,7 @@ class LibraryListAdapter(private val songList: List<Song>) :
         }
 
         holder.itemView.setOnClickListener {
-            playlistViewModel.currentLocation = position
-            playlistViewModel.playList = songList.toMutableList()
-            if (booleanViewModel.shuffleState) {
-                booleanViewModel.shuffleState = false
-                fullSheetShuffleButton!!.isChecked = false
-            }
-            replacePlaylist(playlistViewModel.playList, position)
+            replacePlaylist(songList.toMutableList(), position)
         }
 
         holder.itemView.setOnLongClickListener {

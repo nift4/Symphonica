@@ -33,27 +33,20 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
 import org.akanework.symphonica.MainActivity
-import org.akanework.symphonica.MainActivity.Companion.fullSheetShuffleButton
-import org.akanework.symphonica.MainActivity.Companion.isListShuffleEnabled
 import org.akanework.symphonica.MainActivity.Companion.musicPlayer
-import org.akanework.symphonica.MainActivity.Companion.playlistViewModel
 import org.akanework.symphonica.R
 import org.akanework.symphonica.SymphonicaApplication.Companion.context
 import org.akanework.symphonica.logic.data.Song
 import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.notification
 import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.updateMetadata
-import org.akanework.symphonica.logic.util.LoopingMode
 import org.akanework.symphonica.logic.util.MediaStateCallback
 import org.akanework.symphonica.logic.util.Playlist
 import org.akanework.symphonica.logic.util.PlaylistCallbacks
 import org.akanework.symphonica.logic.util.Timestamp
-import org.akanework.symphonica.logic.util.broadcastMetaDataUpdate
 import org.akanework.symphonica.logic.util.changePlayerStatus
 import org.akanework.symphonica.logic.util.nextSong
 import org.akanework.symphonica.logic.util.prevSong
 import org.akanework.symphonica.logic.util.thisSong
-import org.akanework.symphonica.ui.component.PlaylistBottomSheet.Companion.updatePlaylistSheetLocation
-import kotlin.random.Random
 
 /**
  * [SymphonicaPlayerService] is the core of Symphonica.
@@ -66,11 +59,8 @@ import kotlin.random.Random
  *
  * Arguments:
  * It receives [Intent] when being called.
- * [playlistViewModel] is used to store playlist and
- * current position across this instance.
  * ----------------------------------------------------
- * 1. "ACTION_REPLACE_AND_PLAY" will replace current playlist
- * and start playing.
+ * 1. "ACTION_PLAY" will start playing.
  * 2. "ACTION_PAUSE" will pause current player instance.
  * 3. "ACTION_RESUME" will resume current player instance.
  * 4. "ACTION_NEXT" will make the player plays the next song
@@ -106,7 +96,7 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
             try {
                 Glide.with(context)
                     .asBitmap()
-                    .load(playlistViewModel.playList[playlistViewModel.currentLocation].imgUri)
+                    .load(musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.imgUri)
                     .placeholder(R.drawable.ic_song_default_cover)
                     .into(object : CustomTarget<Bitmap>() {
                         override fun onResourceReady(
@@ -119,16 +109,16 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
                                 MediaMetadata.Builder()
                                     .putString(
                                         MediaMetadata.METADATA_KEY_TITLE,
-                                        playlistViewModel.playList[playlistViewModel.currentLocation].title
+                                        musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.title
                                     )
                                     .putString(
                                         MediaMetadata.METADATA_KEY_ARTIST,
-                                        playlistViewModel.playList[playlistViewModel.currentLocation].artist
+                                        musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.artist
                                     )
                                     .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmapResource)
                                     .putLong(
                                         MediaMetadata.METADATA_KEY_DURATION,
-                                        playlistViewModel.playList[playlistViewModel.currentLocation].duration
+                                        musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.duration
                                     )
                                     .build()
                             )
@@ -149,11 +139,11 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
                     MediaMetadata.Builder()
                         .putString(
                             MediaMetadata.METADATA_KEY_TITLE,
-                            playlistViewModel.playList[playlistViewModel.currentLocation].title
+                            musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.title
                         )
                         .putString(
                             MediaMetadata.METADATA_KEY_ARTIST,
-                            playlistViewModel.playList[playlistViewModel.currentLocation].artist
+                            musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.artist
                         )
                         .putBitmap(
                             MediaMetadata.METADATA_KEY_ALBUM_ART,
@@ -164,7 +154,7 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
                         )
                         .putLong(
                             MediaMetadata.METADATA_KEY_DURATION,
-                            playlistViewModel.playList[playlistViewModel.currentLocation].duration
+                            musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.duration
                         )
                         .build()
                 )
@@ -175,7 +165,7 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
 
     private val mediaSessionCallback = object : MediaSession.Callback() {
         override fun onSeekTo(pos: Long) {
-            musicPlayer?.seekTo(pos)
+            musicPlayer.seekTo(pos)
         }
 
         override fun onSkipToNext() {
@@ -187,23 +177,11 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
         }
 
         override fun onPause() {
-            if (musicPlayer != null) {
-                changePlayerStatus()
-            } else if (playlistViewModel.playList.size != 0
-                && playlistViewModel.currentLocation != playlistViewModel.playList.size
-            ) {
-                thisSong()
-            }
+            changePlayerStatus()
         }
 
         override fun onPlay() {
-            if (musicPlayer != null) {
-                changePlayerStatus()
-            } else if (playlistViewModel.playList.size != 0
-                && playlistViewModel.currentLocation != playlistViewModel.playList.size
-            ) {
-                thisSong()
-            }
+            changePlayerStatus()
         }
     }
 
@@ -225,13 +203,13 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            "ACTION_REPLACE_AND_PLAY" -> {
-                stopAndPlay()
+            "ACTION_PLAY" -> {
+                startPlaying()
             }
 
             "ACTION_PAUSE" -> {
-                if (musicPlayer != null && musicPlayer!!.isPlaying) {
-                    musicPlayer!!.pause()
+                if (musicPlayer.isPlaying) {
+                    musicPlayer.pause()
                 }
             }
 
@@ -240,23 +218,17 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
             }
 
             "ACTION_RESUME" -> {
-                if (musicPlayer != null && !musicPlayer!!.isPlaying) {
-                    musicPlayer!!.play()
+                if (!musicPlayer.isPlaying) {
+                    musicPlayer.play()
                 }
             }
 
             "ACTION_NEXT" -> {
-                if (musicPlayer != null) {
-                    nextSongDecisionMaker()
-                    startPlaying()
-                }
+                musicPlayer.next()
             }
 
             "ACTION_PREV" -> {
-                if (musicPlayer != null) {
-                    prevSongDecisionMaker()
-                    startPlaying()
-                }
+                musicPlayer.prev()
             }
 
             "ACTION_JUMP" -> {
@@ -267,12 +239,11 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
     }
 
     private fun startPlaying() {
-        musicPlayer!!.playlist = Playlist(playlistViewModel.playList)
         musicPlayer.play()
     }
 
     private fun stopAndPlay() {
-        musicPlayer!!.pause()
+        musicPlayer.pause()
         startPlaying()
     }
 
@@ -282,79 +253,6 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
             val intentKillBroadcast = Intent("internal.play_mini_player_stop")
             sendBroadcast(intentKillBroadcast)
         }
-    }
-
-    private fun stopPlaying() {
-        musicPlayer!!.recycle()
-        broadcastMetaDataUpdate()
-    }
-
-    private fun prevSongDecisionMaker() {
-        val previousLocation = playlistViewModel.currentLocation
-        if (!isListShuffleEnabled && musicPlayer.loopingMode != LoopingMode.LOOPING_MODE_TRACK) {
-            playlistViewModel.currentLocation =
-                if (playlistViewModel.currentLocation == 0 && musicPlayer.loopingMode == LoopingMode.LOOPING_MODE_PLAYLIST && !fullSheetShuffleButton!!.isChecked) {
-                    playlistViewModel.playList.size - 1
-                } else if (playlistViewModel.currentLocation == 0 && musicPlayer.loopingMode == LoopingMode.LOOPING_MODE_NONE && !fullSheetShuffleButton!!.isChecked) {
-                    stopPlaying()
-                    0
-                } else if (playlistViewModel.currentLocation != 0 && !fullSheetShuffleButton!!.isChecked) {
-                    playlistViewModel.currentLocation - 1
-                } else if (fullSheetShuffleButton!!.isChecked && playlistViewModel.playList.size != 1) {
-                    Random.nextInt(0, playlistViewModel.playList.size)
-                } else {
-                    0
-                }
-        } else if (musicPlayer.loopingMode != LoopingMode.LOOPING_MODE_TRACK) {
-            playlistViewModel.currentLocation =
-                if (playlistViewModel.currentLocation == 0 && musicPlayer.loopingMode == LoopingMode.LOOPING_MODE_NONE) {
-                    playlistViewModel.playList.size - 1
-                } else if (playlistViewModel.currentLocation == 0 && musicPlayer.loopingMode == LoopingMode.LOOPING_MODE_PLAYLIST) {
-                    stopPlaying()
-                    0
-                } else {
-                    playlistViewModel.currentLocation - 1
-                }
-        }
-
-        // Who the fuck opens the playlist and use media control to select the
-        // previous song? Not me.
-        updatePlaylistSheetLocation(previousLocation)
-    }
-
-    private fun nextSongDecisionMaker() {
-        val previousLocation = playlistViewModel.currentLocation
-        if (!isListShuffleEnabled && musicPlayer.loopingMode != LoopingMode.LOOPING_MODE_TRACK) {
-            playlistViewModel.currentLocation =
-                if (playlistViewModel.currentLocation == playlistViewModel.playList.size - 1 && musicPlayer.loopingMode == LoopingMode.LOOPING_MODE_PLAYLIST && !fullSheetShuffleButton!!.isChecked) {
-                    0
-                } else if (playlistViewModel.currentLocation == playlistViewModel.playList.size - 1 && musicPlayer.loopingMode == LoopingMode.LOOPING_MODE_NONE && !fullSheetShuffleButton!!.isChecked) {
-                    stopPlaying()
-                    0
-                } else if (playlistViewModel.currentLocation != playlistViewModel.playList.size - 1 && !fullSheetShuffleButton!!.isChecked) {
-                    playlistViewModel.currentLocation + 1
-                } else if (fullSheetShuffleButton!!.isChecked && playlistViewModel.playList.size != 1) {
-                    Random.nextInt(0, playlistViewModel.playList.size)
-                } else {
-                    0
-                }
-        } else if (musicPlayer.loopingMode != LoopingMode.LOOPING_MODE_TRACK) {
-            playlistViewModel.currentLocation =
-                if (playlistViewModel.currentLocation == playlistViewModel.playList.size - 1 &&
-                    musicPlayer.loopingMode == LoopingMode.LOOPING_MODE_PLAYLIST
-                ) {
-                    0
-                } else if (playlistViewModel.currentLocation == playlistViewModel.playList.size - 1 &&
-                    musicPlayer.loopingMode == LoopingMode.LOOPING_MODE_NONE
-                ) {
-                    stopPlaying()
-                    0
-                } else {
-                    playlistViewModel.currentLocation + 1
-                }
-        }
-        updatePlaylistSheetLocation(previousLocation)
-        musicPlayer.playlist?.currentPosition = playlistViewModel.currentLocation
     }
 
     private fun updatePlaybackState(fakePlaying: Boolean = !musicPlayer.isPlaying) {

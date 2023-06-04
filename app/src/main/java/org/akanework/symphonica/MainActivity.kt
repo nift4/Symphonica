@@ -22,14 +22,13 @@ package org.akanework.symphonica
 import android.animation.ObjectAnimator
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.view.View.GONE
 import android.view.View.VISIBLE
@@ -82,7 +81,6 @@ import org.akanework.symphonica.ui.fragment.LibraryFragment
 import org.akanework.symphonica.ui.fragment.SettingsFragment
 import org.akanework.symphonica.ui.viewmodel.BooleanViewModel
 import org.akanework.symphonica.ui.viewmodel.LibraryViewModel
-import org.akanework.symphonica.ui.viewmodel.PlaylistViewModel
 
 /**
  * [MainActivity] is the heart of Symphonica.
@@ -109,12 +107,6 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
     private lateinit var fullSheetControlButton: FloatingActionButton
 
     private lateinit var fullSheetSlider: Slider
-
-    private lateinit var receiverPlay: SheetPlayReceiver
-    private lateinit var receiverStop: SheetStopReceiver
-    private lateinit var receiverPause: SheetPauseReceiver
-    private lateinit var receiverSeek: SheetSeekReceiver
-    private lateinit var receiverUpdate: SheetUpdateReceiver
 
     private lateinit var playlistButton: MaterialButton
 
@@ -148,7 +140,6 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
 
         // These are the view models used across the app.
         lateinit var libraryViewModel: LibraryViewModel
-        lateinit var playlistViewModel: PlaylistViewModel
         lateinit var booleanViewModel: BooleanViewModel
 
         // This is drawer needed in companion functions to decide
@@ -250,25 +241,6 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
 
     }
 
-    private fun updateAlbumView(view: View) {
-        val sheetAlbumCover: ImageView? = view.findViewById(R.id.sheet_album_cover)
-        val fullSheetCover: ImageView? = view.findViewById(R.id.sheet_cover)
-        sheetAlbumCover?.setImageResource(R.drawable.ic_song_default_cover)
-        if (sheetAlbumCover != null) {
-            Glide.with(context)
-                .load(playlistViewModel.playList[playlistViewModel.currentLocation].imgUri)
-                .diskCacheStrategy(diskCacheStrategyCustom)
-                .into(sheetAlbumCover)
-        }
-        fullSheetCover?.setImageResource(R.drawable.ic_song_default_cover)
-        if (fullSheetCover != null) {
-            Glide.with(context)
-                .load(playlistViewModel.playList[playlistViewModel.currentLocation].imgUri)
-                .diskCacheStrategy(diskCacheStrategyCustom)
-                .into(fullSheetCover)
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -293,26 +265,6 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
             DiskCacheStrategy.NONE
         }
 
-        // Register event receiver for bottom sheet.
-        // This receiver should be receiving Broadcast from
-        // SymphonicaPlayerService.kt .
-
-        receiverPause = SheetPauseReceiver()
-        receiverPlay = SheetPlayReceiver()
-        receiverStop = SheetStopReceiver()
-        receiverSeek = SheetSeekReceiver()
-        receiverUpdate = SheetUpdateReceiver()
-
-        /*registerReceiver(receiverPause, IntentFilter("internal.play_pause"), RECEIVER_NOT_EXPORTED)
-        registerReceiver(receiverPlay, IntentFilter("internal.play_start"), RECEIVER_NOT_EXPORTED)
-        registerReceiver(receiverStop, IntentFilter("internal.play_stop"), RECEIVER_NOT_EXPORTED)
-        registerReceiver(receiverSeek, IntentFilter("internal.play_seek"), RECEIVER_NOT_EXPORTED)
-        registerReceiver(
-            receiverUpdate,
-            IntentFilter("internal.play_update"),
-            RECEIVER_NOT_EXPORTED
-        )*/
-
         // Flatten the decors to fit the system windows.
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
@@ -321,7 +273,6 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
 
         // Initialize view models.
         libraryViewModel = ViewModelProvider(this)[LibraryViewModel::class.java]
-        playlistViewModel = ViewModelProvider(this)[PlaylistViewModel::class.java]
         booleanViewModel = ViewModelProvider(this)[BooleanViewModel::class.java]
 
         // Open external audio files.
@@ -450,16 +401,20 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
             }
         }
 
+        /*
+
         fullSheetShuffleButton?.isChecked = booleanViewModel.shuffleState
 
         fullSheetShuffleButton?.addOnCheckedChangeListener { _, isChecked ->
             if (!isListShuffleEnabled &&
-                playlistViewModel.playList.isNotEmpty()
+                musicPlayer.playlist != null &&
+                musicPlayer.playlist!!.size != 0
             ) {
                 fullSheetLoopButton?.isChecked = isChecked
                 booleanViewModel.shuffleState = isChecked
-            } else if (playlistViewModel.playList.isNotEmpty()) {
-                val playlist = playlistViewModel.playList
+            } else if (musicPlayer.playlist != null &&
+                musicPlayer.playlist!!.size != 0) {
+                val playlist = musicPlayer.playlist
                 val originalPlaylist = playlistViewModel.originalPlaylist
                 val currentSong = playlist[playlistViewModel.currentLocation]
 
@@ -486,14 +441,16 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
             }
         }
 
+         */
+
 
         bottomSheetControlButton.setOnClickListener {
-            if (musicPlayer != null) {
-                changePlayerStatus()
-            } else if (musicPlayer == null && playlistViewModel.playList.size != 0
-                && playlistViewModel.currentLocation != playlistViewModel.playList.size
+            if (musicPlayer.playlist != null &&
+                musicPlayer.playlist!!.size != 0
             ) {
                 thisSong()
+            } else {
+                changePlayerStatus()
             }
         }
 
@@ -518,12 +475,11 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
         }
 
         fullSheetControlButton.setOnClickListener {
-            if (musicPlayer != null) {
-                changePlayerStatus()
-            } else if (musicPlayer == null && playlistViewModel.playList.size != 0
-                && playlistViewModel.currentLocation != playlistViewModel.playList.size
-            ) {
+            if (musicPlayer.playlist != null &&
+                musicPlayer.playlist!!.size != 0) {
                 thisSong()
+            } else {
+                changePlayerStatus()
             }
         }
 
@@ -555,8 +511,9 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
             val dialogDuration: TextInputEditText = rootView.findViewById(R.id.dialog_duration)!!
             val dialogPath: TextInputEditText = rootView.findViewById(R.id.dialog_path)!!
 
-            if (playlistViewModel.playList.size > playlistViewModel.currentLocation) {
-                val song = playlistViewModel.playList[playlistViewModel.currentLocation]
+            if (musicPlayer.playlist != null &&
+                musicPlayer.playlist!!.size != musicPlayer.playlist!!.currentPosition) {
+                val song = musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!
                 dialogID.setText(song.id.toString())
                 dialogPath.setText(song.path)
                 dialogDuration.setText(song.duration.toString())
@@ -710,7 +667,8 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
 
         // Update the data if resumed.
         // They might be lost if don't do so.
-        if (playlistViewModel.playList.size != 0) {
+        if (musicPlayer.playlist != null &&
+            musicPlayer.playlist!!.size > 0) {
             updateMetadata()
             updateAlbumView(this.findViewById(R.id.global_bottom_sheet))
         }
@@ -722,149 +680,10 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
         // Unregister everything.
         musicPlayer.removeMediaStateCallback(this)
         musicPlayer.unregisterPlaylistCallback(this)
-        /*unregisterReceiver(receiverPause)
-        unregisterReceiver(receiverStop)
-        unregisterReceiver(receiverPlay)
-        unregisterReceiver(receiverSeek)
-        unregisterReceiver(receiverUpdate)*/
         navigationView = null
         fullSheetLoopButton = null
         fullSheetShuffleButton = null
         super.onDestroy()
-    }
-
-    /**
-     * This is the SheetPlayReceiver.
-     * It receives a broadcast from [receiverPlay] and involves
-     * changes of various UI components including:
-     * [bottomSheetSongName], [bottomSheetArtistAndAlbum],
-     * [fullSheetSongName], [fullSheetAlbum], [fullSheetArtist],
-     * [fullSheetLocation].
-     * It also uses [updateAlbumView].
-     */
-    inner class SheetPlayReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (musicPlayer != null && playlistViewModel.currentLocation !=
-                playlistViewModel.playList.size
-            ) {
-
-            }
-        }
-    }
-
-    /**
-     * This is the SheetStopReceiver.
-     * It receives a broadcast from [receiverStop] and involves
-     * changes of various UI components including:
-     * [bottomSheetControlButton], [fullSheetControlButton],
-     * [fullSheetSlider].
-     */
-    inner class SheetStopReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-        }
-
-    }
-
-    /**
-     * This is the SheetPauseReceiver.
-     * It receives a broadcast from [receiverPause] and involves
-     * changes of various UI components including:
-     * [bottomSheetControlButton], [fullSheetControlButton].
-     */
-    inner class SheetPauseReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-        }
-
-    }
-
-    /**
-     * This is the SheetSeekReceiver
-     * It receives a broadcast from [receiverSeek] and involves
-     * changes of [setPlaybackState].
-     */
-    inner class SheetSeekReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-        }
-    }
-
-    /**
-     * This is the SheetUpdateReceiver.
-     * It receives a broadcast from [receiverUpdate] and involves
-     * changes of various UI components including:
-     * [bottomSheetSongName], [bottomSheetArtistAndAlbum],
-     * [fullSheetSongName], [fullSheetAlbum], [fullSheetArtist],
-     * [fullSheetLocation].
-     * This receiver is used when resuming the activity.
-     */
-    inner class SheetUpdateReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            /*if (musicPlayer != null && playlistViewModel.currentLocation < playlistViewModel.playList.size) {
-                bottomSheetSongName.text =
-                    playlistViewModel.playList[playlistViewModel.currentLocation].title
-                bottomSheetArtistAndAlbum.text =
-                    getString(
-                        R.string.playlist_metadata_information,
-                        playlistViewModel.playList[playlistViewModel.currentLocation].artist,
-                        playlistViewModel.playList[playlistViewModel.currentLocation].album
-                    )
-                fullSheetSongName.text =
-                    playlistViewModel.playList[playlistViewModel.currentLocation].title
-                fullSheetAlbum.text =
-                    playlistViewModel.playList[playlistViewModel.currentLocation].album
-                fullSheetArtist.text =
-                    playlistViewModel.playList[playlistViewModel.currentLocation].artist
-                fullSheetDuration.text =
-                    convertDurationToTimeStamp(
-                        playlistViewModel.playList[playlistViewModel.currentLocation].duration.toString()
-                    )
-                // If you don't use a round bracket here the ViewModel would die from +1s.
-                fullSheetLocation.text =
-                    getString(
-                        R.string.full_sheet_playlist_location,
-                        ((playlistViewModel.currentLocation) + 1).toString(),
-                        playlistViewModel.playList.size.toString()
-                    )
-
-                if (musicPlayer!!.isPlaying) {
-                    bottomSheetControlButton.icon =
-                        ContextCompat.getDrawable(
-                            SymphonicaApplication.context,
-                            R.drawable.ic_pause
-                        )
-                    fullSheetControlButton.setImageResource(R.drawable.ic_pause)
-                }
-
-                updateAlbumView(this@MainActivity.findViewById(R.id.global_bottom_sheet))
-            } else if (playlistViewModel.currentLocation < playlistViewModel.playList.size) {
-                bottomSheetSongName.text =
-                    playlistViewModel.playList[playlistViewModel.currentLocation].title
-                bottomSheetArtistAndAlbum.text =
-                    getString(
-                        R.string.playlist_metadata_information,
-                        playlistViewModel.playList[playlistViewModel.currentLocation].artist,
-                        playlistViewModel.playList[playlistViewModel.currentLocation].album
-                    )
-                fullSheetSongName.text =
-                    playlistViewModel.playList[playlistViewModel.currentLocation].title
-                fullSheetAlbum.text =
-                    playlistViewModel.playList[playlistViewModel.currentLocation].album
-                fullSheetArtist.text =
-                    playlistViewModel.playList[playlistViewModel.currentLocation].artist
-                fullSheetDuration.text =
-                    convertDurationToTimeStamp(
-                        playlistViewModel.playList[playlistViewModel.currentLocation].duration.toString()
-                    )
-                // If you don't use a round bracket here the ViewModel would die from +1s.
-                fullSheetLocation.text =
-                    getString(
-                        R.string.full_sheet_playlist_location,
-                        ((playlistViewModel.currentLocation) + 1).toString(),
-                        playlistViewModel.playList.size.toString()
-                    )
-                updateAlbumView(this@MainActivity.findViewById(R.id.global_bottom_sheet))
-                updateMetadata()
-            }*/
-        }
     }
 
     override fun onPlaylistReplaced(oldPlaylist: Playlist<Song>?, newPlaylist: Playlist<Song>?) {
@@ -872,7 +691,11 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
     }
 
     override fun onPlaylistPositionChanged(oldPosition: Int, newPosition: Int) {
-        // TODO
+        if (musicPlayer.playlist != null &&
+            musicPlayer.playlist!!.size > 0) {
+            updateBottomPlayerMetadata()
+            updateAlbumView(findViewById(R.id.global_bottom_sheet))
+        }
     }
 
     override fun onPlaylistItemAdded(position: Int) {
@@ -884,38 +707,16 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
     }
 
     override fun onPlayingStatusChanged(playing: Boolean) {
+        Log.d("onPlayingStatusChanged", playing.toString())
         if (playing) {
-            bottomSheetSongName.text =
-                playlistViewModel.playList[playlistViewModel.currentLocation].title
-            bottomSheetArtistAndAlbum.text =
-                getString(
-                    R.string.playlist_metadata_information,
-                    playlistViewModel.playList[playlistViewModel.currentLocation].artist,
-                    playlistViewModel.playList[playlistViewModel.currentLocation].album
-                )
-            fullSheetSongName.text =
-                playlistViewModel.playList[playlistViewModel.currentLocation].title
-            fullSheetAlbum.text =
-                playlistViewModel.playList[playlistViewModel.currentLocation].album
-            fullSheetArtist.text =
-                playlistViewModel.playList[playlistViewModel.currentLocation].artist
-            fullSheetDuration.text =
-                convertDurationToTimeStamp(
-                    playlistViewModel.playList[playlistViewModel.currentLocation].duration.toString()
-                )
-            // If you don't use a round bracket here the ViewModel would die from +1s.
-            fullSheetLocation.text =
-                getString(
-                    R.string.full_sheet_playlist_location,
-                    ((playlistViewModel.currentLocation) + 1).toString(),
-                    playlistViewModel.playList.size.toString()
-                )
+
+            updateBottomPlayerMetadata()
+            updateAlbumView(findViewById(R.id.global_bottom_sheet))
 
             bottomSheetControlButton.icon =
                 ContextCompat.getDrawable(this, R.drawable.ic_pause)
             fullSheetControlButton.setImageResource(R.drawable.ic_pause)
 
-            updateAlbumView(findViewById(R.id.global_bottom_sheet))
         } else {
             bottomSheetControlButton.icon =
                 ContextCompat.getDrawable(this, R.drawable.ic_sheet_play)
@@ -974,6 +775,53 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
 
     override fun onPlaybackSettingsChanged(volume: Float, speed: Float, pitch: Float) {
         // TODO
+    }
+
+    private fun updateBottomPlayerMetadata() {
+        bottomSheetSongName.text =
+            musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.title
+        bottomSheetArtistAndAlbum.text =
+            getString(
+                R.string.playlist_metadata_information,
+                musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.artist,
+                musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.album
+            )
+        fullSheetSongName.text =
+            musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.title
+        fullSheetAlbum.text =
+            musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.album
+        fullSheetArtist.text =
+            musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.artist
+        fullSheetDuration.text =
+            convertDurationToTimeStamp(
+                musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.duration.toString()
+            )
+        // If you don't use a round bracket here the ViewModel would die from +1s.
+        fullSheetLocation.text =
+            getString(
+                R.string.full_sheet_playlist_location,
+                ((musicPlayer.playlist!!.currentPosition) + 1).toString(),
+                musicPlayer.playlist!!.size.toString()
+            )
+    }
+
+    private fun updateAlbumView(view: View) {
+        val sheetAlbumCover: ImageView? = view.findViewById(R.id.sheet_album_cover)
+        val fullSheetCover: ImageView? = view.findViewById(R.id.sheet_cover)
+        sheetAlbumCover?.setImageResource(R.drawable.ic_song_default_cover)
+        if (sheetAlbumCover != null) {
+            Glide.with(context)
+                .load(musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.imgUri)
+                .diskCacheStrategy(diskCacheStrategyCustom)
+                .into(sheetAlbumCover)
+        }
+        fullSheetCover?.setImageResource(R.drawable.ic_song_default_cover)
+        if (fullSheetCover != null) {
+            Glide.with(context)
+                .load(musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.imgUri)
+                .diskCacheStrategy(diskCacheStrategyCustom)
+                .into(fullSheetCover)
+        }
     }
 
 }
