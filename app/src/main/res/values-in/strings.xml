@@ -35,7 +35,6 @@
     <string name="navigation_view_subtitle">Selamat Datang Kembali</string>
     <string name="settings_app_name">Nama Aplikasi</string>
     <string name="settings_version">Versi</string>
-    <string name="settings_version_format">%1$s(%2$s)</string>
     <string name="settings_version_tag">Versi Tidak Diketahui (Versi VSC Tidak Diketahui)</string>
     <string name="sheet_no_playing">Musik Tidak Diputar</string>
     <string name="sheet_now_playing">Diputar Sekarang</string>

@@ -245,21 +245,23 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 	}
 
 	private fun getPrevPosition(cpos: Int? = playlist?.currentPosition): Int? {
-		return getPosition((cpos ?: 0) - 1) ?: cpos
+		return getPosition(cpos?.minus(1))
 	}
 
 	private fun getNextPosition(cpos: Int? = playlist?.currentPosition): Int? {
-		return getPosition((cpos ?: -1) + 1) ?: cpos
+		return getPosition(cpos?.plus(1))
 	}
 
-	private fun getPosition(pos: Int): Int? {
+	private fun getPosition(pos: Int?): Int? {
 		var npos: Int? = null
-		playlist?.let {
-			npos = pos
-			if (npos!! < 0 || npos!! >= it.size) {
-				npos = if (loopingMode == LoopingMode.LOOPING_MODE_PLAYLIST) {
-					npos!!.mod(it.size) // % is rem, not mod, don't use it here
-				} else null
+		pos?.let { p ->
+			playlist?.let {
+				npos = p
+				if (npos!! < 0 || npos!! >= it.size) {
+					npos = if (loopingMode == LoopingMode.LOOPING_MODE_PLAYLIST) {
+						npos!!.mod(it.size) // % is rem, not mod, don't use it here
+					} else null
+				}
 			}
 		}
 		return npos

@@ -573,7 +573,7 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
                 // when the number is too big (like when toValue
                 // used the duration directly) we might encounter
                 // some performance problem.
-                musicPlayer?.seekTo((slider.value * 1000).toLong())
+                musicPlayer.seekTo((slider.value * 1000).toLong())
 
                 isUserTracking = false
             }
