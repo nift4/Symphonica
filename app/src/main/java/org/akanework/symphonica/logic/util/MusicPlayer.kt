@@ -201,6 +201,10 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 					== getNextItem(false))
 	}
 
+	override fun onPlaybackCompleted() {
+		hasConsumedFirst = false
+	}
+
 	fun play() {
 		if (!isPlaying) {
 			playOrPause()
