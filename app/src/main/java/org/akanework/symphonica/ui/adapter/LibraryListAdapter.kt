@@ -28,15 +28,12 @@ import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import org.akanework.symphonica.MainActivity
-import org.akanework.symphonica.MainActivity.Companion.booleanViewModel
 import org.akanework.symphonica.MainActivity.Companion.diskCacheStrategyCustom
-import org.akanework.symphonica.MainActivity.Companion.fullSheetShuffleButton
 import org.akanework.symphonica.MainActivity.Companion.libraryViewModel
 import org.akanework.symphonica.R
 import org.akanework.symphonica.SymphonicaApplication
 import org.akanework.symphonica.logic.data.Song
 import org.akanework.symphonica.logic.util.addToNext
-import org.akanework.symphonica.logic.util.broadcastMetaDataUpdate
 import org.akanework.symphonica.logic.util.convertDurationToTimeStamp
 import org.akanework.symphonica.logic.util.replacePlaylist
 import org.akanework.symphonica.ui.fragment.LibraryAlbumDisplayFragment
@@ -137,9 +134,6 @@ class LibraryListAdapter(private val songList: List<Song>) :
 
             addToNextButton!!.setOnClickListener {
                 addToNext(songList[position])
-
-                broadcastMetaDataUpdate()
-
                 rootView.dismiss()
             }
 

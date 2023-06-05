@@ -232,7 +232,10 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
             }
 
             "ACTION_JUMP" -> {
-                stopAndPlay()
+                val nextSong = intent.getIntExtra("index", 0)
+                musicPlayer.pause()
+                musicPlayer.playlist!!.currentPosition = nextSong
+                musicPlayer.play()
             }
         }
         return START_STICKY
@@ -240,11 +243,6 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
 
     private fun startPlaying() {
         musicPlayer.play()
-    }
-
-    private fun stopAndPlay() {
-        musicPlayer.pause()
-        startPlaying()
     }
 
     private fun killMiniPlayer() {

@@ -62,6 +62,11 @@ class Playlist<T>(initialList: List<T>?) {
 			return null
 		return trackList[pos].toTrack()
 	}
+
+	fun toMutableList(): MutableList<T> {
+		return trackList.map { it.toTrack() }.toMutableList()
+	}
+
 }
 
 interface PlaylistCallbacks<T> {

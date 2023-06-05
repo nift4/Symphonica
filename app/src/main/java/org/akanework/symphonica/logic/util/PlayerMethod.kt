@@ -48,6 +48,7 @@ fun addToNext(nextSong: Song) {
 fun jumpTo(index: Int) {
     val intent = Intent(SymphonicaApplication.context, SymphonicaPlayerService::class.java)
     intent.action = "ACTION_JUMP"
+    intent.putExtra("index", index)
     SymphonicaApplication.context.startService(intent)
 }
 
