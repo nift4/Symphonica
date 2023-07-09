@@ -98,6 +98,7 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 
 	companion object {
 		private const val TAG = "MediaPlayerState"
+		private const val DEBUG = MusicPlayer.DEBUG
 	}
 
 	private lateinit var mediaPlayer: MediaPlayer
@@ -124,9 +125,9 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 		get() = postProducer {
 				if (state == StateDiagram.PREPARED || state == StateDiagram.STARTED
 						|| state == StateDiagram.PAUSED || state == StateDiagram.STOPPED) {
-					Log.v(TAG, "calling getCurrentPosition()")
+					if (DEBUG) Log.v(TAG, "calling getCurrentPosition()")
 					lastPosition = mediaPlayer.currentPosition.toLong()
-					Log.v(TAG, "getCurrentPosition done")
+					if (DEBUG) Log.v(TAG, "getCurrentPosition done")
 					return@postProducer lastPosition
 				} else {
 					return@postProducer null
@@ -746,23 +747,34 @@ interface Playable {
 }
 
 abstract class NextTrackPredictor {
+	companion object {
+		private const val TAG = "NextTrackPredictor"
+	}
 	private var onPredictionChangedListener: OnPredictionChangedListener? = null
 
 	protected fun dispatchPredictionChange(currentSongImpacted: Boolean) {
+		Log.v(TAG, "dispatchPredictionChange(currentSongImpacted=$currentSongImpacted)")
 		onPredictionChangedListener?.onPredictionChanged(currentSongImpacted)
+		Log.v(TAG, "dispatchPredictionChange done")
 	}
 
 	protected fun dispatchPlayOrPause() {
+		Log.v(TAG, "dispatchPlayOrPause()")
 		onPredictionChangedListener?.playOrPause()
+		Log.v(TAG, "dispatchPlayOrPause done")
 	}
 
 	protected fun dispatchSeek(newPosMillis: Long) {
+		Log.v(TAG, "dispatchSeek(newPosMillis=$newPosMillis)")
 		onPredictionChangedListener?.seek(newPosMillis)
+		Log.v(TAG, "dispatchSeek done")
 	}
 
 
 	protected fun dispatchPlaybackSettings(volume: Float, speed: Float, pitch: Float) {
+		Log.v(TAG, "dispatchPlaybackSettings(volume=$volume, speed=$speed, pitch=$pitch)")
 		onPredictionChangedListener?.updatePlaybackSettings(volume, speed, pitch)
+		Log.v(TAG, "dispatchPlaybackSettings done")
 	}
 
 	/**
@@ -925,18 +937,24 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 		}
 	private var ignoreAudioFocus = false
 		set(value) {
+			Log.v(TAG, "ignoreAudioFocus=$value playing=$playing userPlaying=$userPlaying " +
+					"hasAudioFocus=$hasAudioFocus")
 			field = value
 			if (playing && userPlaying && !value && !hasAudioFocus) {
 				realPause()
 			} else if (value && userPlaying && !playing) {
 				realPlay()
 			}
+			Log.v(TAG, "ignoreAudioFocus done")
 		}
 	private var hasAudioFocus = false
 		set(value) {
 			if (value != field) {
+				Log.v(TAG, "ignoreAudioFocus=$ignoreAudioFocus playing=$playing userPlaying=$userPlaying " +
+						"hasAudioFocus=$value")
 				field = value
 				if (value) {
+					Log.v(TAG, "ignoreAudioFocus now true")
 					ignoreAudioFocus = false
 				}
 				if (!ignoreAudioFocus) {
@@ -946,6 +964,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 						realPlay()
 					}
 				}
+				Log.v(TAG, "hasAudioFocus done")
 			}
 		}
 	private var seekable = false
@@ -977,6 +996,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	private fun createMediaPlayer(): MediaPlayerState {
+		Log.v(TAG, "allocating new media player")
 		return MediaPlayerState(applicationContext, handler, playbackAttributes, this)
 	}
 
@@ -992,6 +1012,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun playOrPause() {
+		Log.v(TAG, "playOrPause()")
 		if (playing) {
 			userPlaying = false
 			realPause()
@@ -1019,9 +1040,11 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 				realPlay()
 			}
 		}
+		Log.v(TAG, "playOrPause done")
 	}
 
 	override fun seek(newPosMillis: Long) {
+		Log.v(TAG, "seek(newPosMillis=$newPosMillis)")
 		if (!seekable) {
 			throw IllegalArgumentException("tried to seek on unseekable MediaPlayer")
 		}
@@ -1030,17 +1053,21 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 		} else {
 			Log.w(TAG, "seek to $newPosMillis lost")
 		}
+		Log.v(TAG, "seek done")
 	}
 
 	override fun updatePlaybackSettings(volume: Float, speed: Float, pitch: Float) {
+		Log.v(TAG, "updatePlaybackSettings(volume=$volume, speed=$speed, pitch=$pitch)")
 		mediaPlayer?.updatePlaybackSettings(volume, speed, pitch)
 		this.volume = volume
 		this.pitch = pitch
 		this.speed = speed
 		onPlaybackSettingsChanged(volume, speed, pitch)
+		Log.v(TAG, "updatePlaybackSettings done")
 	}
 
 	private fun stop() {
+		Log.v(TAG, "stop()")
 		userPlaying = false
 		timestamp = null
 		try {
@@ -1059,16 +1086,20 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 			nextMediaPlayer = null
 		}
 		maybeCleanupPool()
+		Log.v(TAG, "stop done")
 	}
 
 	fun destroy() {
+		Log.v(TAG, "destroy()")
 		stop()
 		for (i in 1..mediaPlayerPool.size) {
 			mediaPlayerPool.removeFirst().destroy()
 		}
+		Log.v(TAG, "destroy done")
 	}
 
 	override fun onAudioFocusChange(focusChange: Int) {
+		Log.v(TAG, "onAudioFocusChange(focusChange=$focusChange)")
 		when (focusChange) {
 			AudioManager.AUDIOFOCUS_GAIN -> {
 				hasAudioFocus = true
@@ -1085,9 +1116,11 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 				// Since Android Oreo, system handles ducking for us.
 			}
 		}
+		Log.v(TAG, "onAudioFocusChange done")
 	}
 
 	private fun realPlay() {
+		Log.v(TAG, "realPlay()")
 		playing = true
 		if (mediaPlayer == null) {
 			skip()
@@ -1095,14 +1128,18 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 			mediaPlayer?.updatePlaybackSettings(volume, speed, pitch)
 			mediaPlayer?.start(true)
 		}
+		Log.v(TAG, "realPlay done")
 	}
 
 	private fun realPause() {
+		Log.v(TAG, "realPause()")
 		playing = false
 		mediaPlayer?.pause()
+		Log.v(TAG, "realPause done")
 	}
 
 	override fun onPredictionChanged(currentSongImpacted: Boolean) {
+		Log.v(TAG, "onPredictionChanged(currentSongImpacted=$currentSongImpacted)")
 		nextMediaPlayer?.let {
 			it.recycle()
 			mediaPlayerPool.add(it)
@@ -1134,6 +1171,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 				}
 			)
 		}
+		Log.v(TAG, "onPredictionChanged done")
 	}
 
 	/**
@@ -1141,6 +1179,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	 * current song is no longer played (e.g. user is now playing another song).
 	 */
 	private fun skip() {
+		Log.v(TAG, "skip()")
 		if (mediaPlayer != null) {
 			throw IllegalStateException("mediaPlayer != null, recycle it before calling skip()")
 		}
@@ -1171,6 +1210,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 		}
 		seekable = true
 		maybeCleanupPool()
+		Log.v(TAG, "skip done")
 	}
 
 	private fun maybeCleanupPool() {
@@ -1181,6 +1221,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onRecycleSelf(mp: MediaPlayerState) {
+		Log.v(TAG, "onRecycleSelf(...)")
 		if (mp == mediaPlayer || mp == nextMediaPlayer) {
 			if (mp == mediaPlayer) {
 				mediaPlayer = null
@@ -1190,9 +1231,11 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 			mediaPlayerPool.add(mp)
 		}
 		maybeCleanupPool()
+		Log.v(TAG, "onRecycleSelf done")
 	}
 
 	override fun onDestroySelf(mp: MediaPlayerState) {
+		Log.v(TAG, "onDestroySelf(...)")
 		if (mp == mediaPlayer || mp == nextMediaPlayer) {
 			if (mp == mediaPlayer) {
 				mediaPlayer = null
@@ -1205,9 +1248,11 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 			mediaPlayerPool.add(mp)
 		}
 		maybeCleanupPool()
+		Log.v(TAG, "onDestroySelf done")
 	}
 
 	override fun onInternalPlaybackError(mp: MediaPlayerState, what: Int) {
+		Log.v(TAG, "onInternalPlaybackError(..., what=$what)")
 		if (mp == nextMediaPlayer) {
 			Log.w(TAG, "Next media player has internal error $what")
 			return
@@ -1217,9 +1262,11 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 			return
 		}
 		onPlaybackError(what)
+		Log.v(TAG, "onInternalPlaybackError done")
 	}
 
 	override fun onTrackPlaybackError(mp: MediaPlayerState, what: Int) {
+		Log.v(TAG, "onTrackPlaybackError(..., what=$what)")
 		if (mp == nextMediaPlayer) {
 			Log.w(TAG, "Next media player has track error $what")
 			return
@@ -1229,9 +1276,11 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 			return
 		}
 		onPlaybackError(what)
+		Log.v(TAG, "onTrackPlaybackError done")
 	}
 
 	override fun onCompletedPlaying(mp: MediaPlayerState) {
+		Log.v(TAG, "onCompletedPlaying(...)")
 		// If there's nothing next and looping is unset, we end up here.
 		// This means the last song has played.
 		if (nextMediaPlayer == null) {
@@ -1251,30 +1300,38 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 			}
 		}
 		maybeCleanupPool()
+		Log.v(TAG, "onCompletedPlaying done")
 	}
 
 	override fun onMediaDecreasedPerformance(mp: MediaPlayerState) {
+		Log.v(TAG, "onMediaDecreasedPerformance(...)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player has decreased performance")
 		}
 		onMediaHasDecreasedPerformance()
+		Log.v(TAG, "onMediaDecreasedPerformance done")
 	}
 
 	override fun onBufferStatusUpdate(mp: MediaPlayerState, progress: Float) {
+		Log.v(TAG, "onBufferStatusUpdate(..., progress=$progress)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player has buffer progress")
 		}
 		onMediaBufferProgress(progress)
+		Log.v(TAG, "onBufferStatusUpdate done")
 	}
 
 	override fun onMediaBuffering(mp: MediaPlayerState, buffering: Boolean) {
+		Log.v(TAG, "onMediaBuffering(..., buffering=$buffering)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player is buffering slow")
 		}
 		onMediaBufferSlowStatus(buffering)
+		Log.v(TAG, "onMediaBuffering done")
 	}
 
 	override fun onMediaStartedAsNext(mp: MediaPlayerState) {
+		Log.v(TAG, "onMediaStartedAsNext(...)")
 		if (mediaPlayer != null) {
 			throw IllegalStateException()
 		}
@@ -1284,46 +1341,59 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 		trackPredictor.predictNextTrack(true)
 		onDurationAvailable(mp.durationMillis)
 		maybeCleanupPool()
+		Log.v(TAG, "onMediaStartedAsNext done")
 	}
 
 	override fun onMetadataUpdate(mp: MediaPlayerState) {
+		Log.v(TAG, "onMetadataUpdate(...)")
 		// This seems to be triggered when [live] metadata is deemed existing, and if metadata
 		// without buffer gets found. Probably useless?
+		Log.v(TAG, "onMetadataUpdate done")
 	}
 
 	override fun onUnseekablePlayback(mp: MediaPlayerState) {
+		Log.v(TAG, "onUnseekablePlayback(...)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player is unseekable")
 		}
 		seekable = false
+		Log.v(TAG, "onUnseekablePlayback done")
 	}
 
 	override fun onNewTimestampAvailable(mp: MediaPlayerState, mts: Timestamp) {
+		Log.v(TAG, "onNewTimestampAvailable(..., mts=$mts)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player has new timestamps")
 		}
 		timestamp = mts
+		Log.v(TAG, "onNewTimestampAvailable done")
 	}
 
 	override fun onLiveDataAvailable(mp: MediaPlayerState, text: String) {
+		Log.v(TAG, "onLiveDataAvailable(..., text=$text)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player has live data")
 		}
 		onLiveInfoAvailable(text)
+		Log.v(TAG, "onLiveDataAvailable done")
 	}
 
 	override fun onDurationAvailable(mp: MediaPlayerState, durationMillis: Long) {
+		Log.v(TAG, "onDurationAvailable(..., durationMillis=$durationMillis)")
 		if (mp == mediaPlayer) {
 			onDurationAvailable(durationMillis)
 		}
+		Log.v(TAG, "onDurationAvailable done")
 	}
 
 	override fun onSeekCompleted(mp: MediaPlayerState) {
+		Log.v(TAG, "onSeekCompleted(...)")
 		if (mp == mediaPlayer && !playing) {
 			// semi-hack-ish, because we don't get new timestamp events if paused
 			// MediaPlayer will update it accurately the moment someone presses play
 			timestamp = Timestamp(System.nanoTime(), mp.currentPosition, speed)
 			onMediaTimestampChanged(mp.currentPosition)
 		}
+		Log.v(TAG, "onSeekCompleted done")
 	}
 }

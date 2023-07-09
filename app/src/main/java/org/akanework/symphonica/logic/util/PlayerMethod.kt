@@ -65,9 +65,7 @@ fun nextSong() {
  * [thisSong] will stop the music player and play current song.
  */
 fun thisSong() {
-    val intent = Intent(SymphonicaApplication.context, SymphonicaPlayerService::class.java)
-    intent.action = "ACTION_PLAY"
-    SymphonicaApplication.context.startService(intent)
+    SymphonicaApplication.context.musicPlayer.playlist?.currentPosition?.let { jumpTo(it) }
 }
 
 /**

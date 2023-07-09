@@ -445,13 +445,7 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
 
 
         bottomSheetControlButton.setOnClickListener {
-            if (musicPlayer.playlist != null &&
-                musicPlayer.playlist!!.size != 0
-            ) {
-                thisSong()
-            } else {
-                changePlayerStatus()
-            }
+            changePlayerStatus()
         }
 
         bottomPlayerPreview.setOnClickListener {
@@ -475,12 +469,7 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
         }
 
         fullSheetControlButton.setOnClickListener {
-            if (musicPlayer.playlist != null &&
-                musicPlayer.playlist!!.size != 0) {
-                thisSong()
-            } else {
-                changePlayerStatus()
-            }
+            changePlayerStatus()
         }
 
         fullSheetBackButton.setOnClickListener {
