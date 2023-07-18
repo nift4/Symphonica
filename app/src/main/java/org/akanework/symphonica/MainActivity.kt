@@ -62,7 +62,6 @@ import kotlinx.coroutines.withContext
 import org.akanework.symphonica.SymphonicaApplication.Companion.context
 import org.akanework.symphonica.logic.data.Song
 import org.akanework.symphonica.logic.data.loadDataFromDisk
-import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.updateMetadata
 import org.akanework.symphonica.logic.util.LoopingMode
 import org.akanework.symphonica.logic.util.MediaStateCallback
 import org.akanework.symphonica.logic.util.Playlist
@@ -654,7 +653,6 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
         // They might be lost if don't do so.
         if (musicPlayer.playlist != null &&
             musicPlayer.playlist!!.size > 0) {
-            updateMetadata()
             updateAlbumView(this.findViewById(R.id.global_bottom_sheet))
         }
 

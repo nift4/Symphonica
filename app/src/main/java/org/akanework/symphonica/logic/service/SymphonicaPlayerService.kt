@@ -37,8 +37,6 @@ import org.akanework.symphonica.MainActivity.Companion.musicPlayer
 import org.akanework.symphonica.R
 import org.akanework.symphonica.SymphonicaApplication.Companion.context
 import org.akanework.symphonica.logic.data.Song
-import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.notification
-import org.akanework.symphonica.logic.service.SymphonicaPlayerService.Companion.updateMetadata
 import org.akanework.symphonica.logic.util.MediaStateCallback
 import org.akanework.symphonica.logic.util.Playlist
 import org.akanework.symphonica.logic.util.PlaylistCallbacks
@@ -46,7 +44,6 @@ import org.akanework.symphonica.logic.util.Timestamp
 import org.akanework.symphonica.logic.util.changePlayerStatus
 import org.akanework.symphonica.logic.util.nextSong
 import org.akanework.symphonica.logic.util.prevSong
-import org.akanework.symphonica.logic.util.thisSong
 
 /**
  * [SymphonicaPlayerService] is the core of Symphonica.
@@ -70,97 +67,96 @@ import org.akanework.symphonica.logic.util.thisSong
  */
 class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks<Song> {
 
-    companion object {
-        val mediaSession = MediaSession(context, "PlayerService")
-        private val mediaStyle: Notification.MediaStyle =
-            Notification.MediaStyle().setMediaSession(mediaSession.sessionToken)
-        private val notification = Notification.Builder(context, "channel_symphonica")
-            .setStyle(mediaStyle)
-            .setSmallIcon(R.drawable.ic_note)
-            .setActions()
-            .build()
+    val mediaSession = MediaSession(context, "PlayerService")
+    private val mediaStyle: Notification.MediaStyle =
+        Notification.MediaStyle().setMediaSession(mediaSession.sessionToken)
+    private val notification = Notification.Builder(context, "channel_symphonica")
+        .setStyle(mediaStyle)
+        .setSmallIcon(R.drawable.ic_note)
+        .setActions()
+        .build()
 
 
-        /**
-         * [updateMetadata] is used for [notification] to update its
-         * metadata information. You can find this functions all across
-         * Symphonica.
-         *
-         * It does not need any arguments, instead it uses the [playlistViewModel]
-         * and [Glide] to update it's info. You can call it up anywhere.
-         */
-        @SuppressLint("NotificationPermission") // not needed for media notifications
-        fun updateMetadata() {
-            var initialized = false
-            lateinit var bitmapResource: Bitmap
-            try {
-                Glide.with(context)
-                    .asBitmap()
-                    .load(musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.imgUri)
-                    .placeholder(R.drawable.ic_song_default_cover)
-                    .into(object : CustomTarget<Bitmap>() {
-                        override fun onResourceReady(
-                            resource: Bitmap,
-                            transition: Transition<in Bitmap>?
-                        ) {
-                            bitmapResource = resource
-                            initialized = true
-                            mediaSession.setMetadata(
-                                MediaMetadata.Builder()
-                                    .putString(
-                                        MediaMetadata.METADATA_KEY_TITLE,
-                                        musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.title
-                                    )
-                                    .putString(
-                                        MediaMetadata.METADATA_KEY_ARTIST,
-                                        musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.artist
-                                    )
-                                    .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmapResource)
-                                    .putLong(
-                                        MediaMetadata.METADATA_KEY_DURATION,
-                                        musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.duration
-                                    )
-                                    .build()
-                            )
-                        }
+    /**
+     * [updateMetadata] is used for [notification] to update its
+     * metadata information. You can find this functions all across
+     * Symphonica.
+     *
+     * It does not need any arguments, instead it uses the playlistViewModel
+     * and [Glide] to update it's info. You can call it up anywhere.
+     */
+    @SuppressLint("NotificationPermission") // not needed for media notifications
+    fun updateMetadata() {
+        var initialized = false
+        lateinit var bitmapResource: Bitmap
+        try {
+            Glide.with(context)
+                .asBitmap()
+                .load(musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.imgUri)
+                .placeholder(R.drawable.ic_song_default_cover)
+                .into(object : CustomTarget<Bitmap>() {
+                    override fun onResourceReady(
+                        resource: Bitmap,
+                        transition: Transition<in Bitmap>?
+                    ) {
+                        bitmapResource = resource
+                        initialized = true
+                        mediaSession.setMetadata(
+                            MediaMetadata.Builder()
+                                .putString(
+                                    MediaMetadata.METADATA_KEY_TITLE,
+                                    musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.title
+                                )
+                                .putString(
+                                    MediaMetadata.METADATA_KEY_ARTIST,
+                                    musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.artist
+                                )
+                                .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmapResource)
+                                .putLong(
+                                    MediaMetadata.METADATA_KEY_DURATION,
+                                    musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.duration
+                                )
+                                .build()
+                        )
+                    }
 
-                        override fun onLoadCleared(placeholder: Drawable?) {
-                            // this is called when imageView is cleared on lifecycle call or for
-                            // some other reason.
-                            // if you are referencing the bitmap somewhere else too other than this imageView
-                            // clear it here as you can no longer have the bitmap
-                        }
-                    })
-            } catch (_: Exception) {
-                // Placeholder here.
-            }
-            if (!initialized) {
-                mediaSession.setMetadata(
-                    MediaMetadata.Builder()
-                        .putString(
-                            MediaMetadata.METADATA_KEY_TITLE,
-                            musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.title
-                        )
-                        .putString(
-                            MediaMetadata.METADATA_KEY_ARTIST,
-                            musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.artist
-                        )
-                        .putBitmap(
-                            MediaMetadata.METADATA_KEY_ALBUM_ART,
-                            AppCompatResources.getDrawable(
-                                context,
-                                R.drawable.ic_album_notification_cover
-                            )!!.toBitmap()
-                        )
-                        .putLong(
-                            MediaMetadata.METADATA_KEY_DURATION,
-                            musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.duration
-                        )
-                        .build()
-                )
-            }
-            MainActivity.managerSymphonica.notify(1, notification)
+                    override fun onLoadCleared(placeholder: Drawable?) {
+                        // this is called when imageView is cleared on lifecycle call or for
+                        // some other reason.
+                        // if you are referencing the bitmap somewhere else too other than this imageView
+                        // clear it here as you can no longer have the bitmap
+                    }
+                })
+        } catch (_: Exception) {
+            // Placeholder here.
         }
+        if (!initialized) {
+            mediaSession.setMetadata(
+                MediaMetadata.Builder()
+                    .putString(
+                        MediaMetadata.METADATA_KEY_TITLE,
+                        musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.title
+                    )
+                    .putString(
+                        MediaMetadata.METADATA_KEY_ARTIST,
+                        musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.artist
+                    )
+                    .putBitmap(
+                        MediaMetadata.METADATA_KEY_ALBUM_ART,
+                        AppCompatResources.getDrawable(
+                            context,
+                            R.drawable.ic_album_notification_cover
+                        )!!.toBitmap()
+                    )
+                    .putLong(
+                        MediaMetadata.METADATA_KEY_DURATION,
+                        musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.duration
+                    )
+                    .build()
+            )
+        }
+        MainActivity.managerSymphonica.notify(1, notification)
+        updatePlaybackState()
     }
 
     private val mediaSessionCallback = object : MediaSession.Callback() {
@@ -204,7 +200,7 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             "ACTION_PLAY" -> {
-                startPlaying()
+                musicPlayer.play()
             }
 
             "ACTION_PAUSE" -> {
@@ -233,16 +229,10 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
 
             "ACTION_JUMP" -> {
                 val nextSong = intent.getIntExtra("index", 0)
-                musicPlayer.pause()
                 musicPlayer.playlist!!.currentPosition = nextSong
-                musicPlayer.play()
             }
         }
         return START_STICKY
-    }
-
-    private fun startPlaying() {
-        musicPlayer.play()
     }
 
     private fun killMiniPlayer() {
@@ -339,7 +329,7 @@ class SymphonicaPlayerService : Service(), MediaStateCallback, PlaylistCallbacks
     }
 
     override fun onPlaylistPositionChanged(oldPosition: Int, newPosition: Int) {
-        // TODO
+        updateMetadata()
     }
 
     override fun onPlaylistItemAdded(position: Int) {

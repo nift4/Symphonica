@@ -11,11 +11,7 @@ import android.media.TimedMetaData
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
-import android.os.Looper
-import android.os.Message
-import android.os.MessageQueue
 import android.util.Log
-import java.lang.Exception
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.function.Supplier
 
@@ -157,35 +153,35 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 			Log.v(TAG, "calling MediaPlayer()")
 			mediaPlayer = MediaPlayer()
 			Log.v(TAG, "done calling MediaPlayer()")
-			Log.v(TAG, "calling setOnErrorListener()")
+			if (DEBUG) Log.v(TAG, "calling setOnErrorListener()")
 			mediaPlayer.setOnErrorListener(this)
-			Log.v(TAG, "done calling setOnErrorListener()")
+			if (DEBUG) Log.v(TAG, "done calling setOnErrorListener()")
 			// according to MediaPlayer javadoc, setting error listener and then
 			// calling reset() allows us to catch more errors
-			Log.v(TAG, "calling reset()")
+			if (DEBUG) Log.v(TAG, "calling reset()")
 			mediaPlayer.reset()
-			Log.v(TAG, "done calling reset()")
-			Log.v(TAG, "calling setOnBufferingUpdateListener()")
+			if (DEBUG) Log.v(TAG, "done calling reset()")
+			if (DEBUG) Log.v(TAG, "calling setOnBufferingUpdateListener()")
 			mediaPlayer.setOnBufferingUpdateListener(this)
-			Log.v(TAG, "done calling setOnBufferingUpdateListener()")
-			Log.v(TAG, "calling setOnSeekCompleteListener()")
+			if (DEBUG) Log.v(TAG, "done calling setOnBufferingUpdateListener()")
+			if (DEBUG) Log.v(TAG, "calling setOnSeekCompleteListener()")
 			mediaPlayer.setOnSeekCompleteListener(this)
-			Log.v(TAG, "done calling setOnSeekCompleteListener()")
-			Log.v(TAG, "calling setOnCompletionListener()")
+			if (DEBUG) Log.v(TAG, "done calling setOnSeekCompleteListener()")
+			if (DEBUG) Log.v(TAG, "calling setOnCompletionListener()")
 			mediaPlayer.setOnCompletionListener(this)
-			Log.v(TAG, "done calling setOnCompletionListener()")
-			Log.v(TAG, "calling setOnInfoListener()")
+			if (DEBUG) Log.v(TAG, "done calling setOnCompletionListener()")
+			if (DEBUG) Log.v(TAG, "calling setOnInfoListener()")
 			mediaPlayer.setOnInfoListener(this)
-			Log.v(TAG, "done calling setOnInfoListener()")
-			Log.v(TAG, "calling setOnMediaTimeDiscontinuityListener()")
+			if (DEBUG) Log.v(TAG, "done calling setOnInfoListener()")
+			if (DEBUG) Log.v(TAG, "calling setOnMediaTimeDiscontinuityListener()")
 			mediaPlayer.setOnMediaTimeDiscontinuityListener(this, handler)
-			Log.v(TAG, "done calling setOnMediaTimeDiscontinuityListener()")
-			Log.v(TAG, "calling setOnPreparedListener()")
+			if (DEBUG) Log.v(TAG, "done calling setOnMediaTimeDiscontinuityListener()")
+			if (DEBUG) Log.v(TAG, "calling setOnPreparedListener()")
 			mediaPlayer.setOnPreparedListener(this)
-			Log.v(TAG, "done calling setOnPreparedListener()")
-			Log.v(TAG, "calling setOnTimedMetaDataAvailableListener()")
+			if (DEBUG) Log.v(TAG, "done calling setOnPreparedListener()")
+			if (DEBUG) Log.v(TAG, "calling setOnTimedMetaDataAvailableListener()")
 			mediaPlayer.setOnTimedMetaDataAvailableListener(this)
-			Log.v(TAG, "done calling setOnTimedMetaDataAvailableListener()")
+			if (DEBUG) Log.v(TAG, "done calling setOnTimedMetaDataAvailableListener()")
 		}
 	}
 
@@ -939,7 +935,29 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 		.setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
 		.build()
 	private var mediaPlayer: MediaPlayerState? = null
+		set(value) {
+			if (field != null && value != null) {
+				throw IllegalStateException("leaking active media player")
+			}
+			Log.v(TAG, "active media player now is $value, was $field")
+			field = value
+		}
 	private var nextMediaPlayer: MediaPlayerState? = null
+		set(value) {
+			if (field != null && value != null) {
+				throw IllegalStateException("leaking next media player")
+			}
+			Log.v(TAG, "next media player now is $value, was $field")
+			field = value
+		}
+	private var mediaPlayerLeaked: MediaPlayerState? = null
+		set(value) {
+			if (field != null && value != null) {
+				throw IllegalStateException("leaking leaked media player")
+			}
+			Log.v(TAG, "leaked media player now is $value, was $field")
+			field = value
+		}
 	private var trackPredictor: NextTrackPredictor = defaultTrackPredictor
 	private var playing = false
 		set(value) {
@@ -976,7 +994,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 						"hasAudioFocus=$value")
 				field = value
 				if (value) {
-					Log.v(TAG, "ignoreAudioFocus now true")
+					Log.v(TAG, "ignoreAudioFocus now false")
 					ignoreAudioFocus = false
 				}
 				if (!ignoreAudioFocus) {
@@ -1228,7 +1246,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 			}
 		} else {
 			userPlaying = false
-			Log.i(TAG, "stopped playback at last song")
+			trackPredictor.onPlaybackCompleted()
 		}
 		seekable = true
 		maybeCleanupPool()
@@ -1244,31 +1262,36 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 
 	override fun onRecycleSelf(mp: MediaPlayerState) {
 		Log.v(TAG, "onRecycleSelf($mp)")
-		if (mp == mediaPlayer || mp == nextMediaPlayer) {
-			if (mp == mediaPlayer) {
-				mediaPlayer = null
-			} else {
-				nextMediaPlayer = null
+		if (mp == mediaPlayer || mp == nextMediaPlayer || mp == mediaPlayerLeaked) {
+			when (mp) {
+				mediaPlayer ->
+					mediaPlayer = null
+				mediaPlayerLeaked ->
+					mediaPlayerLeaked = null
+				else ->
+					nextMediaPlayer = null
 			}
-			mediaPlayerPool.add(mp)
 		}
+		mediaPlayerPool.add(mp)
 		maybeCleanupPool()
 		Log.v(TAG, "onRecycleSelf done")
 	}
 
 	override fun onDestroySelf(mp: MediaPlayerState) {
 		Log.v(TAG, "onDestroySelf($mp)")
-		if (mp == mediaPlayer || mp == nextMediaPlayer) {
-			if (mp == mediaPlayer) {
-				mediaPlayer = null
-				// We just use our nextMediaPlayer if available, as we skip() to the NEXT song in
-				// this case.
-				skip()
-			} else {
-				nextMediaPlayer = null
+		if (mp == mediaPlayer || mp == nextMediaPlayer || mp == mediaPlayerLeaked) {
+			when (mp) {
+				mediaPlayer -> {
+					mediaPlayer = null
+					skip() // some error that caused destruction occurred, go to the next song
+				}
+				mediaPlayerLeaked ->
+					mediaPlayerLeaked = null
+				else ->
+					nextMediaPlayer = null
 			}
-			mediaPlayerPool.add(mp)
 		}
+		mediaPlayerPool.remove(mp)
 		maybeCleanupPool()
 		Log.v(TAG, "onDestroySelf done")
 	}
@@ -1306,11 +1329,8 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 		// if mp is not mediaPlayer, perhaps there is something wrong. most likely, we got
 		// caught up in framework-side race condition
 		if (mp == mediaPlayer && nextMediaPlayer == null) {
-			mediaPlayer?.let {
-				it.recycle()
-				mediaPlayerPool.add(it)
-				mediaPlayer = null
-			}
+			// mediaPlayer has(!) to recycle or destroy itself after calling here
+			mediaPlayer = null
 			// If there's nothing next and looping is unset, we end up here.
 			// This means the last song has played.
 			val playable = trackPredictor.predictNextTrack(false)
@@ -1361,9 +1381,11 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 			throw IllegalStateException()
 		}
 		nextMediaPlayer = null
-		if (mediaPlayer == null) {
-			// what
-			throw IllegalStateException()
+		if (mediaPlayer != null) {
+			// because the order of onCompletedPlaying() and onMediaStartedAsNext() is random,
+			// we have to be careful of the two different cases in this function.
+			mediaPlayerLeaked = mediaPlayer
+			mediaPlayer = null
 		}
 		mediaPlayer = mp
 		seekable = true
