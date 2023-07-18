@@ -11,8 +11,11 @@ import android.media.TimedMetaData
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
+import android.os.Looper
+import android.os.Message
+import android.os.MessageQueue
 import android.util.Log
-import java.lang.IllegalArgumentException
+import java.lang.Exception
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.function.Supplier
 
@@ -97,12 +100,20 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 	}
 
 	companion object {
-		private const val TAG = "MediaPlayerState"
 		private const val DEBUG = MusicPlayer.DEBUG
+	}
+	private val TAG = "MediaPlayerState[${hashCode()}]"
+
+	override fun toString(): String {
+		return TAG
 	}
 
 	private lateinit var mediaPlayer: MediaPlayer
 	private var state = StateDiagram.IDLE
+		set(value) {
+			Log.v(TAG, "state is now: $value, was $field")
+			field = value
+		}
 	private var prepareListener: Runnable? = null
 		set(value) {
 			if (field != null && value != null) {
@@ -132,7 +143,9 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 				} else {
 					return@postProducer null
 				}
-		} ?: lastPosition
+		} ?: lastPosition.also {
+			if (DEBUG) Log.v(TAG, "using cached value $lastPosition instead of current")
+		}
 	private var seeking = -1L
 	private var seekingDesired = -1L
 	private var volume = 0f
@@ -205,8 +218,8 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 			}
 		} else if (what == -38) {
 			// -38 == -ENOSYS, Android means INVALID_OPERATION, it means it's a bug in our code
-			Log.v(TAG, "onError done")
-			throw IllegalStateException("Illegal state transition in MediaPlayer")
+			throw IllegalStateException("INVALID_OPERATION in MediaPlayer, cause should(!)" +
+					" be printed earlier")
 		}
 		// This error is new/unknown/vendor extension
 		Log.e(TAG, "unsupported error what=$what extra=$extra")
@@ -281,6 +294,8 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 				onMediaBuffering(false)
 			}
 			MediaPlayer.MEDIA_INFO_STARTED_AS_NEXT -> {
+				assertState(StateDiagram.PREPARED)
+				state = StateDiagram.STARTED
 				onMediaStartedAsNext()
 			}
 			MediaPlayer.MEDIA_INFO_METADATA_UPDATE -> {
@@ -324,14 +339,14 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 		return true
 	}
 
-	@Suppress("Deprecation")
 	override fun onMediaTimeDiscontinuity(mp: MediaPlayer, mts: MediaTimestamp) {
 		Log.v(TAG, "(state=$state) onMediaTimeDiscontinuity: mts=$mts")
-		if (state != StateDiagram.BUSY) {
-			assertState(StateDiagram.STARTED, StateDiagram.PAUSED)
+		// Please note this can be called in any state and we will silently ignore this,
+		// because this can happen due to races
+		if (state == StateDiagram.STARTED || state == StateDiagram.PAUSED) {
 			val ts = Timestamp(
 				if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P)
-					mts.anchorSytemNanoTime
+					@Suppress("Deprecation") mts.anchorSytemNanoTime
 				else
 					mts.anchorSystemNanoTime
 			, mts.anchorMediaTimeUs / 1000, mts.mediaClockRate)
@@ -373,15 +388,15 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 	}
 
 	private fun recycleSelf() {
+		onCompletedPlaying()
 		recycle()
 		onRecycleSelf()
-		onCompletedPlaying()
 	}
 
 	private fun destroySelf() {
+		onCompletedPlaying()
 		destroy()
 		onDestroySelf()
-		onCompletedPlaying()
 	}
 
 	private fun cleanup() {
@@ -392,8 +407,7 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 	}
 
 	fun destroy() {
-		post {
-			assertNotState(StateDiagram.BUSY, StateDiagram.END)
+		postAssertingNotState(StateDiagram.BUSY, StateDiagram.END) {
 			state = StateDiagram.BUSY
 			cleanup()
 			Log.v(TAG, "calling release()")
@@ -404,9 +418,8 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 	}
 
 	fun recycle() {
-		if (state != StateDiagram.IDLE) {
-			post {
-				assertNotState(StateDiagram.BUSY, StateDiagram.END)
+		postAssertingNotState(StateDiagram.BUSY, StateDiagram.END) {
+			if (state != StateDiagram.IDLE) {
 				state = StateDiagram.BUSY
 				cleanup()
 				Log.v(TAG, "calling reset()")
@@ -418,8 +431,7 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 	}
 
 	fun initialize(playable: Playable) {
-		post {
-			assertState(StateDiagram.IDLE)
+		postAssertingState(StateDiagram.IDLE) {
 			state = StateDiagram.BUSY
 			Log.v(TAG, "calling setDataSource()")
 			mediaPlayer.setDataSource(applicationContext, playable.uri)
@@ -428,24 +440,17 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 		}
 	}
 
-	fun preload(async: Boolean) {
-		post {
-			assertState(StateDiagram.INITIALIZED, StateDiagram.STOPPED)
+	fun preload() {
+		postAssertingState(StateDiagram.INITIALIZED, StateDiagram.STOPPED) {
 			state = StateDiagram.BUSY
 			Log.v(TAG, "calling setDataSource()")
 			mediaPlayer.setAudioAttributes(playbackAttrs)
 			Log.v(TAG, "setDataSource done")
-			if (async) {
-				state = StateDiagram.PREPARING
-				Log.v(TAG, "calling prepareAsync()")
-				mediaPlayer.prepareAsync()
-				Log.v(TAG, "prepareAsync done")
-			} else {
-				Log.v(TAG, "calling prepare()")
-				mediaPlayer.prepare()
-				Log.v(TAG, "prepare done")
-				state = StateDiagram.PREPARED
-			}
+			// MUST be async to avoid races in callbacks due to old callbacks not being un-queued
+			state = StateDiagram.PREPARING
+			Log.v(TAG, "calling prepareAsync()")
+			mediaPlayer.prepareAsync()
+			Log.v(TAG, "prepareAsync done")
 		}
 	}
 
@@ -465,7 +470,7 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 		playbackParams.speed = speed
 		playbackParams.pitch = pitch
 		playbackParams.audioFallbackMode = PlaybackParams.AUDIO_FALLBACK_MODE_FAIL
-		post {
+		postAssertingNotState(StateDiagram.ERROR) {
 			try {
 				Log.v(TAG, "calling setPlaybackParams()")
 				mediaPlayer.playbackParams = playbackParams
@@ -484,24 +489,20 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 		}
 	}
 
-	fun start(async: Boolean) {
-		post {
+	fun start() {
+		postAssertingState(StateDiagram.PREPARED, StateDiagram.PAUSED, StateDiagram.PREPARING,
+					StateDiagram.INITIALIZED, StateDiagram.STOPPED) {
 			if (state == StateDiagram.PREPARING || state == StateDiagram.INITIALIZED
 				|| state == StateDiagram.STOPPED) {
-				if (async) {
-					prepareListener = Runnable {
-						assertState(StateDiagram.PREPARED)
-						start(false)
-					}
+				prepareListener = Runnable {
+					assertState(StateDiagram.PREPARED)
+					start()
 				}
 				if (state != StateDiagram.PREPARING) {
-					preload(async)
+					preload()
 				}
-				if (async) {
-					return@post
-				}
+				return@postAssertingState
 			}
-			assertState(StateDiagram.PREPARED, StateDiagram.PAUSED)
 			state = StateDiagram.BUSY
 			syncPlaybackSettings() // includes mediaPlayer.start in mediaPlayer.setPlaybackParams()
 			state = StateDiagram.STARTED
@@ -510,10 +511,10 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 
 	fun seek(newPosMillis: Long) {
 		seekingDesired = newPosMillis
-		post {
+		postAssertingState(StateDiagram.STARTED, StateDiagram.PAUSED) {
 			if (seeking == -1L) {
 				seeking = seekingDesired
-				Log.v(TAG, "calling seekTo()")
+				Log.v(TAG, "(state=$state) calling seekTo()")
 				mediaPlayer.seekTo(seeking, MediaPlayer.SEEK_PREVIOUS_SYNC)
 				Log.v(TAG, "seekTo done")
 			}
@@ -547,13 +548,12 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 	}
 
 	fun setNext(mp: MediaPlayerState?) {
-		post {
-			assertNotState(
-				StateDiagram.BUSY,
-				StateDiagram.ERROR,
-				StateDiagram.END,
-				StateDiagram.COMPLETED
-			)
+		postAssertingNotState(
+			StateDiagram.BUSY,
+			StateDiagram.ERROR,
+			StateDiagram.END,
+			StateDiagram.COMPLETED
+		) {
 			if (mp == this) {
 				// If we are the next player, just pretend to loop till we aren't anymore.
 				Log.v(TAG, "calling setLooping()")
@@ -572,7 +572,12 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 							post {
 								if (mp.state == StateDiagram.PREPARED) {
 									Log.v(TAG, "calling setNextMediaPlayer()")
-									mediaPlayer.setNextMediaPlayer(mp.mediaPlayer)
+									try {
+										mediaPlayer.setNextMediaPlayer(mp.mediaPlayer)
+									} catch (e: IllegalArgumentException) {
+										Log.e(TAG, "Most likely, the root cause is"
+												+" a previous error! - ${e.message}")
+									}
 									Log.v(TAG, "setNextMediaPlayer done")
 								} else {
 									Log.w(
@@ -697,6 +702,7 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 
 	private inner class Holder<T>(var item: T)
 
+
 	private fun <T> postProducer(r: Supplier<T>): T {
 		val waiter = Object()
 		val cond = AtomicBoolean(handler.looper.isCurrentThread)
@@ -724,19 +730,35 @@ class MediaPlayerState internal constructor(private val applicationContext: Cont
 		return returnValue!!.item
 	}
 
-	private fun assertNotState(vararg badStates: StateDiagram) {
+	private fun assertNotState(vararg badStates: StateDiagram, cause: Exception? = null) {
 		if (badStates.any { state == it }) {
 			throw IllegalStateException("Current state $state is in list of disallowed states: " +
-					badStates.contentDeepToString()
+					badStates.contentDeepToString(), cause
 			)
 		}
 	}
 
-	private fun assertState(vararg goodStates: StateDiagram) {
+	private fun assertState(vararg goodStates: StateDiagram, cause: Exception? = null) {
 		if (!goodStates.any { state == it }) {
 			throw IllegalStateException("Current state $state is not in list of allowed states: " +
-					goodStates.contentDeepToString()
+					goodStates.contentDeepToString(), cause
 			)
+		}
+	}
+
+	private fun postAssertingState(vararg goodStates: StateDiagram, r: Runnable) {
+		val e = IllegalStateException()
+		post {
+			assertState(*goodStates, cause = e)
+			r.run()
+		}
+	}
+
+	private fun postAssertingNotState(vararg badStates: StateDiagram, r: Runnable) {
+		val e = IllegalStateException()
+		post {
+			assertNotState(*badStates, cause = e)
+			r.run()
 		}
 	}
 }
@@ -1126,7 +1148,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 			skip()
 		} else {
 			mediaPlayer?.updatePlaybackSettings(volume, speed, pitch)
-			mediaPlayer?.start(true)
+			mediaPlayer?.start()
 		}
 		Log.v(TAG, "realPlay done")
 	}
@@ -1165,7 +1187,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 					if (playable != null) {
 						nextMediaPlayer = getNextRecycledMediaPlayer()
 						nextMediaPlayer?.initialize(playable)
-						nextMediaPlayer?.preload(true)
+						nextMediaPlayer?.preload()
 						nextMediaPlayer
 					} else null
 				}
@@ -1200,9 +1222,9 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 		if (mediaPlayer != null) {
 			mediaPlayer?.updatePlaybackSettings(volume, speed, pitch)
 			if (playing) {
-				mediaPlayer?.start(true)
+				mediaPlayer?.start()
 			} else {
-				mediaPlayer?.preload(true)
+				mediaPlayer?.preload()
 			}
 		} else {
 			userPlaying = false
@@ -1221,7 +1243,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onRecycleSelf(mp: MediaPlayerState) {
-		Log.v(TAG, "onRecycleSelf(...)")
+		Log.v(TAG, "onRecycleSelf($mp)")
 		if (mp == mediaPlayer || mp == nextMediaPlayer) {
 			if (mp == mediaPlayer) {
 				mediaPlayer = null
@@ -1235,7 +1257,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onDestroySelf(mp: MediaPlayerState) {
-		Log.v(TAG, "onDestroySelf(...)")
+		Log.v(TAG, "onDestroySelf($mp)")
 		if (mp == mediaPlayer || mp == nextMediaPlayer) {
 			if (mp == mediaPlayer) {
 				mediaPlayer = null
@@ -1252,7 +1274,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onInternalPlaybackError(mp: MediaPlayerState, what: Int) {
-		Log.v(TAG, "onInternalPlaybackError(..., what=$what)")
+		Log.v(TAG, "onInternalPlaybackError($mp, what=$what)")
 		if (mp == nextMediaPlayer) {
 			Log.w(TAG, "Next media player has internal error $what")
 			return
@@ -1266,7 +1288,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onTrackPlaybackError(mp: MediaPlayerState, what: Int) {
-		Log.v(TAG, "onTrackPlaybackError(..., what=$what)")
+		Log.v(TAG, "onTrackPlaybackError($mp, what=$what)")
 		if (mp == nextMediaPlayer) {
 			Log.w(TAG, "Next media player has track error $what")
 			return
@@ -1280,17 +1302,19 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onCompletedPlaying(mp: MediaPlayerState) {
-		Log.v(TAG, "onCompletedPlaying(...)")
-		// If there's nothing next and looping is unset, we end up here.
-		// This means the last song has played.
-		if (nextMediaPlayer == null) {
+		Log.v(TAG, "onCompletedPlaying($mp)")
+		// if mp is not mediaPlayer, perhaps there is something wrong. most likely, we got
+		// caught up in framework-side race condition
+		if (mp == mediaPlayer && nextMediaPlayer == null) {
+			mediaPlayer?.let {
+				it.recycle()
+				mediaPlayerPool.add(it)
+				mediaPlayer = null
+			}
+			// If there's nothing next and looping is unset, we end up here.
+			// This means the last song has played.
 			val playable = trackPredictor.predictNextTrack(false)
 			if (playable == null) {
-				mediaPlayer?.let {
-					it.recycle()
-					mediaPlayerPool.add(it)
-					mediaPlayer = null
-				}
 				userPlaying = false
 				trackPredictor.onPlaybackCompleted()
 			} else {
@@ -1304,7 +1328,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onMediaDecreasedPerformance(mp: MediaPlayerState) {
-		Log.v(TAG, "onMediaDecreasedPerformance(...)")
+		Log.v(TAG, "onMediaDecreasedPerformance($mp)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player has decreased performance")
 		}
@@ -1313,7 +1337,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onBufferStatusUpdate(mp: MediaPlayerState, progress: Float) {
-		Log.v(TAG, "onBufferStatusUpdate(..., progress=$progress)")
+		Log.v(TAG, "onBufferStatusUpdate($mp, progress=$progress)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player has buffer progress")
 		}
@@ -1322,7 +1346,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onMediaBuffering(mp: MediaPlayerState, buffering: Boolean) {
-		Log.v(TAG, "onMediaBuffering(..., buffering=$buffering)")
+		Log.v(TAG, "onMediaBuffering($mp, buffering=$buffering)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player is buffering slow")
 		}
@@ -1331,12 +1355,18 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onMediaStartedAsNext(mp: MediaPlayerState) {
-		Log.v(TAG, "onMediaStartedAsNext(...)")
-		if (mediaPlayer != null) {
+		Log.v(TAG, "onMediaStartedAsNext($mp)")
+		if (nextMediaPlayer != mp) {
+			// bug in our code
 			throw IllegalStateException()
 		}
-		seekable = true
+		nextMediaPlayer = null
+		if (mediaPlayer == null) {
+			// what
+			throw IllegalStateException()
+		}
 		mediaPlayer = mp
+		seekable = true
 		// Consume track now that we started playing it.
 		trackPredictor.predictNextTrack(true)
 		onDurationAvailable(mp.durationMillis)
@@ -1345,14 +1375,14 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onMetadataUpdate(mp: MediaPlayerState) {
-		Log.v(TAG, "onMetadataUpdate(...)")
+		Log.v(TAG, "onMetadataUpdate($mp)")
 		// This seems to be triggered when [live] metadata is deemed existing, and if metadata
 		// without buffer gets found. Probably useless?
 		Log.v(TAG, "onMetadataUpdate done")
 	}
 
 	override fun onUnseekablePlayback(mp: MediaPlayerState) {
-		Log.v(TAG, "onUnseekablePlayback(...)")
+		Log.v(TAG, "onUnseekablePlayback($mp)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player is unseekable")
 		}
@@ -1361,7 +1391,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onNewTimestampAvailable(mp: MediaPlayerState, mts: Timestamp) {
-		Log.v(TAG, "onNewTimestampAvailable(..., mts=$mts)")
+		Log.v(TAG, "onNewTimestampAvailable($mp, mts=$mts)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player has new timestamps")
 		}
@@ -1370,7 +1400,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onLiveDataAvailable(mp: MediaPlayerState, text: String) {
-		Log.v(TAG, "onLiveDataAvailable(..., text=$text)")
+		Log.v(TAG, "onLiveDataAvailable($mp, text=$text)")
 		if (mp != mediaPlayer) {
 			throw IllegalStateException("Non-active media player has live data")
 		}
@@ -1379,7 +1409,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onDurationAvailable(mp: MediaPlayerState, durationMillis: Long) {
-		Log.v(TAG, "onDurationAvailable(..., durationMillis=$durationMillis)")
+		Log.v(TAG, "onDurationAvailable($mp, durationMillis=$durationMillis)")
 		if (mp == mediaPlayer) {
 			onDurationAvailable(durationMillis)
 		}
@@ -1387,7 +1417,7 @@ class TransitionMediaPlayer(private val applicationContext: Context) :
 	}
 
 	override fun onSeekCompleted(mp: MediaPlayerState) {
-		Log.v(TAG, "onSeekCompleted(...)")
+		Log.v(TAG, "onSeekCompleted($mp)")
 		if (mp == mediaPlayer && !playing) {
 			// semi-hack-ish, because we don't get new timestamp events if paused
 			// MediaPlayer will update it accurately the moment someone presses play

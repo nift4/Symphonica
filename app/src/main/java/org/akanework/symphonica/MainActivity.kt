@@ -558,11 +558,7 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
             }
 
             override fun onStopTrackingTouch(slider: Slider) {
-                // This value is multiplied by 1000 is because
-                // when the number is too big (like when toValue
-                // used the duration directly) we might encounter
-                // some performance problem.
-                musicPlayer.seekTo((slider.value * 1000).toLong())
+                musicPlayer.seekTo((slider.value * musicPlayer.duration).toLong() / 100)
 
                 isUserTracking = false
             }
@@ -572,7 +568,7 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
 
         fullSheetSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) fullSheetTimeStamp.text =
-                convertDurationToTimeStamp((value * 1000).toInt().toString())
+                convertDurationToTimeStamp((value * musicPlayer.duration).toLong() / 100)
         }
         // Slider behavior ends here.
 
@@ -727,9 +723,10 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
 
     override fun onMediaTimestampChanged(timestampMillis: Long) {
         if (!isUserTracking) {
-            fullSheetSlider.value = musicPlayer.currentTimestamp.toFloat() / 1000
+            fullSheetSlider.value = ((musicPlayer.currentTimestamp * 100f)
+                    / musicPlayer.duration).coerceAtMost(100f)
             fullSheetTimeStamp.text =
-                convertDurationToTimeStamp(musicPlayer.currentTimestamp.toString())
+                convertDurationToTimeStamp(musicPlayer.currentTimestamp)
         }
     }
 
@@ -754,12 +751,7 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
     }
 
     override fun onDurationAvailable(durationMillis: Long) {
-        val vt = (musicPlayer.duration.toFloat() / 1000).coerceAtLeast(1f)
-        fullSheetSlider.valueFrom = 0f
-        if (fullSheetSlider.valueTo != vt) {
-            fullSheetSlider.value = 0f
-            fullSheetSlider.valueTo = vt
-        }
+        fullSheetSlider.value = 0f
     }
 
     override fun onPlaybackSettingsChanged(volume: Float, speed: Float, pitch: Float) {
@@ -783,7 +775,7 @@ class MainActivity : AppCompatActivity(), MediaStateCallback, PlaylistCallbacks<
             musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.artist
         fullSheetDuration.text =
             convertDurationToTimeStamp(
-                musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.duration.toString()
+                musicPlayer.playlist!!.getItem(musicPlayer.playlist!!.currentPosition)!!.duration
             )
         // If you don't use a round bracket here the ViewModel would die from +1s.
         fullSheetLocation.text =

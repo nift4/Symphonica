@@ -152,7 +152,7 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 	var loopingMode = LoopingMode.LOOPING_MODE_NONE
 		set(value) {
 			if (field != value) {
-				Log.v(TAG, "loopingMode=$loopingMode")
+				Log.v(TAG, "loopingMode=$value")
 				val oldNext = predictNextTrack(false)
 				field = value
 				val newNext = predictNextTrack(false)
@@ -316,7 +316,11 @@ class MusicPlayer<T : Playable>(applicationContext: Context) : NextTrackPredicto
 
 	fun seekTo(positionMills: Long) {
 		Log.v(TAG, "seekTo(positionMills=$positionMills)")
-		dispatchSeek(positionMills)
+		try {
+			dispatchSeek(positionMills)
+		} catch (e: IllegalStateException) {
+			Log.w(TAG, "ignoring seek to $positionMills: $e")
+		}
 		Log.v(TAG, "seekTo done")
 	}
 
